@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { EnterSequence, ExitSequence } from '../char/carSequences.js';
+import { BikeMount, BikeDismount } from '../char/bikeSequences.js';
 import { clamp, approach, wrapAngle } from '../core/util.js';
 import { WEAPONS, WEAPON_ORDER, BULLET_FILTER } from './weapons.js';
 
@@ -226,9 +227,14 @@ export class PlayerController {
       // vehicle nearby?
       const veh = this.findVehicle();
       this.nearVehicle = veh;
-      if (veh) g.hud.setPrompt(`[F] ${veh.driver ? 'Hijack · دزدیدن ماشین' : 'Enter · سوار شدن'}  —  ${veh.T.label}`);
+      if (veh) g.hud.setPrompt(`[F] ${veh.isBike ? (veh.driver ? 'Hijack · دزدیدن موتور' : veh.fallen ? 'Pick up & ride · بلند کردن و سوار شدن' : 'Ride · سوار شدن موتور') : veh.driver ? 'Hijack · دزدیدن ماشین' : 'Enter · سوار شدن'}  —  ${veh.T.label}`);
       else g.hud.setPrompt('');
-      if (veh && this.enterPressed()) {
+      if (veh && veh.isBike && this.enterPressed()) {
+        ch.aimTarget = null; ch.input.face = null;
+        new BikeMount(g, ch, veh);
+        this.seqAge = 0;
+        g.hud.setPrompt('');
+      } else if (veh && this.enterPressed()) {
         let side = 1, shuffle = false;
         if (!veh.doorClear(1)) {
           if (!veh.driver && veh.doorClear(-1)) { side = -1; shuffle = true; }
@@ -245,7 +251,7 @@ export class PlayerController {
       this.seqAge += dt;
       g.hud.setPrompt('');
       const seq = ch.seq;
-      if (seq instanceof EnterSequence && (seq.phase === 'approach' || seq.phase === 'align')) {
+      if ((seq instanceof EnterSequence || seq instanceof BikeMount) && (seq.phase === 'approach' || seq.phase === 'align' || seq.phase === 'toPickup')) {
         if ((this.moveIntent > 0.5 && this.seqAge > 0.35) || (this.enterPressed() && this.seqAge > 0.2)) seq.abort('player');
       }
       if (seq instanceof ExitSequence && seq.phase === 'closeOut') {
@@ -280,6 +286,7 @@ export class PlayerController {
         v.input.brake = brk;
         v.input.steer = this.steer;
         v.input.handbrake = inp.down('Space') || (gp && (gp.rb || gp.a));
+        if (v.isBike) v.input.wheelie = (inp.down('ShiftLeft') || inp.down('ShiftRight') || (gp && gp.x)) ? 1 : 0;
         // horn
         this.hornT -= dt;
         if ((inp.down('KeyH') || inp.down('KeyE') || (gp && gp.ls)) && this.hornT <= 0) {
@@ -298,11 +305,12 @@ export class PlayerController {
         v.input.throttle = 0; v.input.brake = 0; v.input.handbrake = false; v.input.steer = 0;
         this.steer = 0;
         let side = ch.seatSide;
-        if (v.speed < 6.5 && !v.doorClear(side)) {
+        if (!v.isBike && v.speed < 6.5 && !v.doorClear(side)) {
           side = v.doorClear(-side) ? -side : 0;
         }
         ch.driveBy = null;
-        if (side) new ExitSequence(g, ch, v, side);
+        if (v.isBike) new BikeDismount(g, ch, v);
+        else if (side) new ExitSequence(g, ch, v, side);
         else g.hud.message('Blocked — can\'t get out here · راه خروج بسته است', 1.6);
       }
     } else {

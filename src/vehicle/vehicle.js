@@ -330,7 +330,7 @@ export class Vehicle {
         w.skidding = 0;
         continue;
       }
-      const compVel = (w.comp - w.lastComp) / h;
+      const compVel = w.lastComp > 0 ? clamp((w.comp - w.lastComp) / h, -5, 5) : 0;
       let Fz = this.k * w.comp + (compVel > 0 ? this.cBump : this.cRebound) * compVel;
       if (w.comp > this.suspRest * 0.85) Fz += this.k * 8 * (w.comp - this.suspRest * 0.85);
       Fz += (i < 2 ? (i === 0 ? arbFront : -arbFront) : (i === 2 ? arbRear : -arbRear));

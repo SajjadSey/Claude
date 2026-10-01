@@ -312,6 +312,57 @@ export class AudioSys {
     }, delay * 1000);
   }
 
+  /* ------------------------------------------------------------- helicopter rotor (nearest one) */
+  makeRotor() {
+    const ctx = this.ctx;
+    const r = {};
+    r.out = ctx.createGain();
+    r.out.gain.value = 0;
+    r.pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    if (r.pan) r.out.connect(r.pan).connect(this.sfx); else r.out.connect(this.sfx);
+    // blade slap: band-limited noise chopped by the blade-pass frequency
+    r.src = ctx.createBufferSource(); r.src.buffer = this.noise; r.src.loop = true;
+    r.bp = ctx.createBiquadFilter(); r.bp.type = 'bandpass'; r.bp.frequency.value = 340; r.bp.Q.value = 0.9;
+    r.chop = ctx.createGain(); r.chop.gain.value = 0.45;
+    r.lfo = ctx.createOscillator(); r.lfo.type = 'sawtooth'; r.lfo.frequency.value = 17;
+    r.lfoG = ctx.createGain(); r.lfoG.gain.value = 0.55;
+    r.lfo.connect(r.lfoG).connect(r.chop.gain);
+    r.src.connect(r.bp).connect(r.chop).connect(r.out);
+    // the low thump that goes with it
+    r.thump = ctx.createOscillator(); r.thump.type = 'sine'; r.thump.frequency.value = 52;
+    r.thG = ctx.createGain(); r.thG.gain.value = 0.35;
+    r.lfo.connect(r.thG.gain);
+    r.thump.connect(r.thG).connect(r.out);
+    // turbine whine
+    r.tur = ctx.createOscillator(); r.tur.type = 'sawtooth'; r.tur.frequency.value = 1450;
+    r.turF = ctx.createBiquadFilter(); r.turF.type = 'bandpass'; r.turF.frequency.value = 1500; r.turF.Q.value = 8;
+    r.turG = ctx.createGain(); r.turG.gain.value = 0.05;
+    r.tur.connect(r.turF).connect(r.turG).connect(r.out);
+    r.src.start(); r.lfo.start(); r.thump.start(); r.tur.start();
+    return r;
+  }
+  updateRotor(dt, game) {
+    let best = null, bd = 1e9;
+    for (const a of game.aircraft) {
+      if (a.removed || a.rotorSpin < 0.05) continue;
+      const d = a.curPos.distanceToSquared(this.listener);
+      if (d < bd) { bd = d; best = a; }
+    }
+    if (!best && !this.rotor) return;
+    if (!this.rotor) this.rotor = this.makeRotor();
+    const r = this.rotor, t = this.ctx.currentTime;
+    const sp = best ? this.spatial(best.curPos, 40, 650) : null;
+    r.out.gain.setTargetAtTime(sp ? 0.42 * sp.g * best.rotorSpin : 0, t, 0.1);
+    if (!sp) return;
+    if (r.pan) r.pan.pan.setTargetAtTime(sp.pan, t, 0.08);
+    const spin = best.rotorSpin;
+    r.lfo.frequency.setTargetAtTime(17 * spin + (best.state === 'down' ? Math.sin(t * 7) * 2 : 0), t, 0.1);
+    r.tur.frequency.setTargetAtTime(1450 * (0.6 + 0.4 * spin), t, 0.2);
+    r.turG.gain.setTargetAtTime(best.state === 'down' ? 0.09 : 0.05, t, 0.1);
+    // muffled with distance
+    r.bp.frequency.setTargetAtTime(220 + 260 * sp.g, t, 0.2);
+  }
+
   /* ------------------------------------------------------------- police siren (nearest car) */
   makeSiren() {
     const ctx = this.ctx;
@@ -464,7 +515,7 @@ export class AudioSys {
     if (veh && !veh.removed) {
       const rpm = veh.rpm;
       const thr = veh.effThrottle || 0;
-      const fire = rpm / 60 * (veh.T.label === 'Muscle' ? 4 : 3); // firing frequency
+      const fire = rpm / 60 * (veh.T.firing || (veh.T.label === 'Muscle' ? 4 : 3)); // firing frequency
       e.o1.frequency.setTargetAtTime(fire, t, 0.03);
       e.o2.frequency.setTargetAtTime(fire * 0.5, t, 0.03);
       e.o3.frequency.setTargetAtTime(fire * 2.01, t, 0.03);
@@ -504,6 +555,7 @@ export class AudioSys {
       }
     }
     this.updateSiren(dt, game);
+    this.updateRotor(dt, game);
     // radio
     const radioTarget = veh && this.radioOn && ch.state === 'vehicle' ? 0.22 : 0;
     this.musicBus.gain.setTargetAtTime(radioTarget, t, 0.5);

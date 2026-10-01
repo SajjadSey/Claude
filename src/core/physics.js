@@ -45,11 +45,18 @@ export class Physics {
     this.prePhysics = [];
     this.pairCooldown = new Map();
     // ragdolls collide with each other but not with their own limbs
+    // (and a body thrown off a vehicle doesn't collide with it for a moment: it starts out overlapping it)
     const owners = this.owners;
+    const self = this;
+    const thrownFrom = (r, o) => r.type === 'ragdoll' && self.time < r.char.ignoreVehUntil &&
+      ((o.type === 'car' && r.char.ignoreVeh === o.vehicle) || (o.type === 'heli' && r.char.ignoreVeh === o.heli));
     this.hooks = {
       filterContactPair(c1, c2) {
         const a = owners.get(c1), b = owners.get(c2);
-        if (a && b && a.type === 'ragdoll' && b.type === 'ragdoll' && a.char === b.char) return null;
+        if (a && b) {
+          if (a.type === 'ragdoll' && b.type === 'ragdoll' && a.char === b.char) return null;
+          if (thrownFrom(a, b) || thrownFrom(b, a)) return null;
+        }
         return RAPIER.SolverFlags.COMPUTE_IMPULSE;
       },
       filterIntersectionPair() { return true; },

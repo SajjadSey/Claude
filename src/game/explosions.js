@@ -68,35 +68,43 @@ export class Explosions {
     for (const m of Object.values(v.model.glassMeshes)) if (m) m.visible = false;
     for (const d of v.model.doors) { d.latched = false; d.scripted = false; d.vel = (Math.random() * 2 + 2); }
     v.deform(new THREE.Vector3(0, v.T.beltY, v.halfL - 0.6), new THREE.Vector3(0, -0.6, -0.4).normalize(), 0.25, 1.6);
-    // blast wave
-    const R = 13;
+    this.blast(p, 13, { exclude: v });
+    void pc;
+  }
+
+  /** Blast wave at p: shoves vehicles, people and props within R, hurting the people. */
+  blast(p, R = 13, { exclude = null, power = 1 } = {}) {
+    const g = this.game;
     for (const o of g.vehicles) {
-      if (o === v || o.removed) continue;
+      if (o === exclude || o.removed) continue;
       _d.subVectors(o.curPos, p);
       const d = _d.length();
       if (d > R) continue;
-      const f = (1 - d / R);
+      const f = (1 - d / R) * power;
       _d.normalize();
       const J = o.T.mass * 9 * f;
       o.body.applyImpulseAtPoint({ x: _d.x * J, y: J * 0.6, z: _d.z * J }, { x: o.curPos.x, y: o.curPos.y + 0.3, z: o.curPos.z }, true);
       o.applyDamage(o.curPos.clone().addScaledVector(_d, -o.halfW), 20000 * f, null);
     }
     for (const c of g.characters) {
+      if (c.state === 'heli') continue;
       const cp = c.ragdoll.active ? c.ragdoll.hipsPosition(_v) : c.pos;
       _d.subVectors(cp, p);
       const d = _d.length();
       if (d > R * 0.8) continue;
-      const f = 1 - d / (R * 0.8);
-      if (c.vehicle === v) { c.damage(500, 'explosion'); }
+      const f = (1 - d / (R * 0.8)) * Math.min(1, power);
+      if (exclude && c.vehicle === exclude) { c.damage(500, 'explosion'); }
       else c.damage(140 * f, 'explosion');
       _d.y = 0;
       _d.normalize();
       const vel = new THREE.Vector3(_d.x * 16 * f, 4 + 8 * f, _d.z * 16 * f);
-      if (c.state === 'vehicle' && c.vehicle !== v) continue;
-      if (c.vehicle === v && c.state === 'vehicle') {
-        // thrown out of the burning wreck
+      if (c.state === 'vehicle' && c.vehicle !== exclude) continue;
+      if (exclude && c.vehicle === exclude && c.state === 'vehicle') {
+        // thrown out of the burning wreck (which it starts out inside of)
         c.leaveVehicleInstant();
         c.state = 'foot';
+        c.ignoreVeh = exclude;
+        c.ignoreVehUntil = g.physics.time + 0.6;
       }
       if (c.ragdoll.active) c.ragdoll.addVelocity(vel);
       else c.toRagdoll(vel, { spin: 3 });
@@ -107,10 +115,11 @@ export class Explosions {
       const d = _d.length();
       if (d > R) continue;
       _d.normalize();
-      const J = (pr.mass || 20) * 12 * (1 - d / R);
+      const J = (pr.mass || 20) * 12 * (1 - d / R) * power;
       pr.body.applyImpulse({ x: _d.x * J, y: J * 0.7, z: _d.z * J }, true);
     }
     g.peds.panic(p, 40, p);
-    void pc;
+    this.flash.position.copy(p);
+    this.flashT = 0.7;
   }
 }

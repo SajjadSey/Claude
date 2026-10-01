@@ -174,10 +174,35 @@ export class HUD {
       ctx.fill();
     }
     for (const c of g.characters) {
-      if (c === ch || c.state === 'vehicle') continue;
+      if (c === ch || c.state === 'vehicle' || c.state === 'heli') continue;
       const cx = (c.pos.x - map.ox) * s - mx, cz = (c.pos.z - map.oz) * s - mz;
       ctx.fillStyle = c.state === 'dead' ? '#7a1010' : c.isCop && WS && WS.stars > 0 ? (blink ? '#2a5bff' : '#ff2a2a') : c.isCop ? '#5577ff' : c.ai && c.ai.mode === 'fight' ? '#ff4040' : '#e8d080';
       ctx.fillRect(cx - 1.2 / k * 0.6, cz - 1.2 / k * 0.6, 2.4 / k * 0.6, 2.4 / k * 0.6);
+    }
+    // helicopters: a body and a rotor cross
+    for (const a of g.aircraft) {
+      const ax = (a.curPos.x - map.ox) * s - mx, az = (a.curPos.z - map.oz) * s - mz;
+      const live = a.state === 'flying' || a.state === 'leaving';
+      ctx.save();
+      ctx.translate(ax, az);
+      ctx.scale(1 / k, 1 / k);
+      ctx.rotate(-(Math.PI + yaw));
+      ctx.fillStyle = !live ? '#555' : WS && WS.stars > 0 ? (blink ? '#ff2a2a' : '#2a5bff') : '#3a5bff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(0, 0, 4.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (live) {
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.6;
+        const ra = g.time * 9;
+        ctx.beginPath();
+        for (let i = 0; i < 2; i++) {
+          const c = Math.cos(ra + i * Math.PI / 2) * 8, sn = Math.sin(ra + i * Math.PI / 2) * 8;
+          ctx.moveTo(-c, -sn); ctx.lineTo(c, sn);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     ctx.restore();
     // player arrow (fixed in the center, rotated by heading relative to the camera)

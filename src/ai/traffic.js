@@ -135,6 +135,7 @@ export class DriverAI {
     this.veh.input.throttle = 0;
     this.veh.input.brake = 0.4;
     this.veh.input.steer = 0;
+    this.veh.input.steerAbs = null;
   }
 
   update(dt) {
@@ -242,6 +243,7 @@ export class DriverAI {
     v.input.throttle = throttle;
     v.input.brake = brake;
     v.input.steer = steer;
+    if (v.isBike) v.input.steerAbs = this.reverseT > 0 ? 0 : steerAngle;
     v.input.handbrake = false;
   }
 
@@ -264,7 +266,7 @@ export class DriverAI {
       check(o.curPos, Math.min(o.halfL, 1.4), 0.4);
     }
     for (const c of this.game.characters) {
-      if (c.state === 'vehicle' || c.removed) continue;
+      if (c.state === 'vehicle' || c.state === 'heli' || c.removed) continue;
       const dx = c.pos.x - v.curPos.x, dz = c.pos.z - v.curPos.z;
       if (dx * dx + dz * dz > 900) continue;
       if (c.pos.y > 0.12 && c.state === 'foot') continue; // on the sidewalk
@@ -275,7 +277,7 @@ export class DriverAI {
 }
 
 /* ======================================================================= manager */
-const TYPES = [['sedan', 0.33], ['taxi', 0.14], ['suv', 0.19], ['sport', 0.1], ['muscle', 0.12], ['police', 0.06]];
+const TYPES = [['sedan', 0.29], ['taxi', 0.13], ['suv', 0.17], ['sport', 0.09], ['muscle', 0.11], ['police', 0.06], ['sportbike', 0.09], ['cruiser', 0.06]];
 function pickType(r) {
   let x = r();
   for (const [t, w] of TYPES) { x -= w; if (x <= 0) return t; }

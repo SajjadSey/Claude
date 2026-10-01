@@ -44,6 +44,7 @@ export class City {
     this.facadeMats = [];
     this.bucket = new GeoBucket();
     this.parkingSpots = [];
+    this.roofs = [];
     this.palms = [];
     this.lamps = [];
     this.trees = [];
@@ -150,6 +151,7 @@ export class City {
     this.buildPalmsInstanced();
     this.buildLampsInstanced();
     this.buildTreesInstanced();
+    this.buildRoofGrid();
     this.bucket.build(this.group, this.mats, {
       shadows: {
         asphalt: { cast: false, receive: true },
@@ -167,6 +169,28 @@ export class City {
     this.buildRoadGraph();
     this.buildPedGraph();
     this.buildMinimap();
+  }
+
+  /* ------------------------------------------------------------------ roof heights (for aircraft) */
+  buildRoofGrid() {
+    const C = 4, S = 720, n = S / C;
+    const grid = new Float32Array(n * n).fill(14); // palms, lamps and signs everywhere
+    for (const [x0, z0, x1, z1, y] of this.roofs) {
+      const i0 = Math.max(0, Math.floor((x0 + S / 2) / C)), i1 = Math.min(n - 1, Math.floor((x1 + S / 2) / C));
+      const j0 = Math.max(0, Math.floor((z0 + S / 2) / C)), j1 = Math.min(n - 1, Math.floor((z1 + S / 2) / C));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) grid[j * n + i] = Math.max(grid[j * n + i], y);
+    }
+    this.roofGrid = { grid, C, S, n };
+  }
+
+  /** Highest obstacle top within radius r of (x, z). */
+  roofHeight(x, z, r = 0) {
+    const { grid, C, S, n } = this.roofGrid;
+    const i0 = Math.max(0, Math.floor((x - r + S / 2) / C)), i1 = Math.min(n - 1, Math.floor((x + r + S / 2) / C));
+    const j0 = Math.max(0, Math.floor((z - r + S / 2) / C)), j1 = Math.min(n - 1, Math.floor((z + r + S / 2) / C));
+    let m = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (grid[j * n + i] > m) m = grid[j * n + i];
+    return m;
   }
 
   /* ------------------------------------------------------------------ ground & roads */
@@ -386,6 +410,8 @@ export class City {
     this.parapetRing(x0, z0, x1, z1, base + h1, style === 'glass' ? 'darkMetal' : 'parapet');
     P.addStaticBox((x0 + x1) / 2, base + h1 / 2, (z0 + z1) / 2, (x1 - x0) / 2, h1 / 2, (z1 - z0) / 2, 0, { surface: 'concrete' });
     let topY = base + h1;
+    // (+ rooftop clutter: water tanks, AC units, antennas)
+    this.roofs.push([x0, z0, x1, z1, base + (tall ? h + 13 : h1 + 6)]);
     if (tall) {
       const ins = Math.min((x1 - x0), (z1 - z0)) * r.range(0.12, 0.22);
       const ux0 = x0 + ins, uz0 = z0 + ins, ux1 = x1 - ins, uz1 = z1 - ins;

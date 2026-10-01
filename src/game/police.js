@@ -5,6 +5,8 @@ import { G, groups } from '../core/physics.js';
 import { DriverAI, lanePoint, edgeDir, START_D, STOP_D } from '../ai/traffic.js';
 import { Character } from '../char/character.js';
 import { copAppearance } from '../char/rig.js';
+import { Heli } from './heli.js';
+import { Roadblocks } from './roadblock.js';
 import { ExitSequence, EnterSequence } from '../char/carSequences.js';
 
 /*
@@ -323,6 +325,9 @@ export class PoliceManager {
     this.arrestT = 0;
     this.ramT = 0;
     this.rng = makeRng(9001);
+    this.heli = null;
+    this.heliT = 0;
+    this.roadblocks = new Roadblocks(this);
   }
 
   get stars() { return this.wanted.stars; }
@@ -341,6 +346,7 @@ export class PoliceManager {
   }
   playerChest(out) {
     const pc = this.game.player.character;
+    if (pc.state === 'vehicle' && pc.vehicle && pc.vehicle.isBike) return pc.rig.bones.chest.getWorldPosition(out);
     if (pc.state === 'vehicle' && pc.vehicle) return out.copy(pc.pos).setY(pc.pos.y + 0.45);
     if (pc.ragdoll.active) return pc.ragdoll.hipsPosition(out);
     return out.copy(pc.pos).setY(pc.pos.y + 1.3 * pc.rig.scale);
@@ -455,7 +461,8 @@ export class PoliceManager {
 
     // dispatch
     this.spawnT -= dt;
-    const active = this.units.filter((u) => !u.leaving && !u.dead).length;
+    // (officers manning a roadblock ahead don't count against the chase cars)
+    const active = this.units.filter((u) => !u.leaving && !u.dead && !(u.roadblock && !u.roadblock.passed)).length;
     if (W.stars > 0 && active < MAX_UNITS[W.stars] && this.spawnT <= 0 && pc.alive && !g.bustedT) {
       this.spawnT = active === 0 ? 4 : 6;
       if (!this.recruitPatrol() && !this.spawnUnit()) this.spawnT = 1; // nowhere suitable right now: retry soon
@@ -464,6 +471,8 @@ export class PoliceManager {
     if (W.stars === 0) for (const u of this.units) if (!u.leaving) this.release(u);
 
     this.updateUnits(dt);
+    this.updateHeli(dt);
+    this.roadblocks.update(dt);
     this.shooters = 0;
     this.arrestNear = false;
     for (const u of this.units) for (const c of u.cops) this.updateCop(c, u, dt);
@@ -482,12 +491,14 @@ export class PoliceManager {
     for (const c of g.characters) {
       if (!c.isCop) continue;
       c.copSees = false;
-      if (!c.alive || c.state === 'ragdoll' || c.state === 'dead' || c.state === 'getup') continue;
+      if (!c.alive || c.state === 'ragdoll' || c.state === 'dead' || c.state === 'getup' || c.state === 'heli') continue;
       const d = c.pos.distanceTo(chest);
       const range = c.state === 'vehicle' ? 110 : 60;
       if (d > range) continue;
       if (d < 10 || this.lineOfSight(c, chest)) { c.copSees = true; seen = true; }
     }
+    // the helicopter crew see a long way from up there
+    if (this.heli && this.heli.seesPlayer) seen = true;
     if (W.stars === 0) { W.seen = false; return; }
     if (seen) this.lostT = 0;
     else this.lostT = (this.lostT || 0) + 0.2;
@@ -616,10 +627,38 @@ export class PoliceManager {
     }
   }
 
+  /* ------------------------------------------------------------- helicopter (4+ stars) */
+  updateHeli(dt) {
+    const g = this.game, W = this.wanted, pc = g.player.character;
+    this.heliT -= dt;
+    const h = this.heli;
+    if (h) {
+      if (h.removed || h.state === 'leaving') { this.heli = null; this.heliT = Math.max(this.heliT, 6); }
+      else if (h.state === 'down' || h.state === 'wreck') { this.heli = null; this.heliT = 40; } // shot down: a new one later
+      else if (W.stars < 4 || !pc.alive || g.bustedT) { h.leave(); this.heli = null; this.heliT = Math.max(this.heliT, 6); }
+    }
+    if (!this.heli && W.stars >= 4 && pc.alive && !g.bustedT && this.heliT <= 0) this.spawnHeli();
+  }
+
+  spawnHeli() {
+    const g = this.game;
+    const p = this.targetPos(_v).clone();
+    const a = this.rng() * Math.PI * 2;
+    const pos = new THREE.Vector3(p.x + Math.cos(a) * 230, 0, p.z + Math.sin(a) * 230);
+    pos.y = Math.max(75, g.city.roofHeight(pos.x, pos.z, 24) + 30);
+    const dir = new THREE.Vector3(p.x - pos.x, 0, p.z - pos.z).normalize();
+    this.heli = new Heli(g, pos, Math.atan2(dir.x, dir.z), { vel: dir.clone().multiplyScalar(22) });
+    g.hud.message('🚁 Police helicopter · هلیکوپتر پلیس', 2.2);
+  }
+
   /** Remove every unit at once (death / arrest respawn). */
   reset() {
     for (const u of this.units) this.removeUnit(u);
     this.units.length = 0;
+    for (const a of this.game.aircraft.slice()) a.remove();
+    this.heli = null;
+    this.heliT = 0;
+    this.roadblocks.clear();
     this.wanted.clear();
     this.arrestT = 0;
     this.trail.length = 0;
@@ -693,6 +732,25 @@ export class PoliceManager {
     c.input.jump = false;
     const v = u.veh;
     const pveh = pc.state === 'vehicle' ? pc.vehicle : null;
+    // manning a roadblock: hold the line behind the cars, guns on the oncoming car
+    const rb = u.roadblock;
+    if (rb && !rb.passed && !u.leaving && W.stars > 0) {
+      const post = u.post && u.post[u.cops.indexOf(c)];
+      const tgt = W.seen ? this.playerPos(_v) : W.lastKnown;
+      const dx = tgt.x - c.pos.x, dz = tgt.z - c.pos.z;
+      const d = Math.max(1e-3, Math.hypot(dx, dz));
+      c.input.face = Math.atan2(dx, dz);
+      const pd = post ? Math.hypot(post.x - c.pos.x, post.z - c.pos.z) : 0;
+      if (pd > 0.7) { c.input.dir.set((post.x - c.pos.x) / pd, 0, (post.z - c.pos.z) / pd); c.input.mag = 0.6; c.input.mode = 'walk'; }
+      else c.input.mag = 0;
+      if (W.stars >= 2 && W.seen && c.copSees && d > 3 && d < 60 && pc.alive && this.shooters < MAX_SHOOTERS[W.stars] + 1) {
+        this.shooters++;
+        c.aimTarget = this.playerChest(c.aimVec || (c.aimVec = new THREE.Vector3()));
+        c.fireT = (c.fireT ?? this.rng.range(0.4, 1.0)) - dt;
+        if (c.fireT <= 0 && c.aimW > 0.85) { this.fire(c); c.fireT = this.rng.range(1.0, 1.7); }
+      } else c.aimTarget = null;
+      return;
+    }
     // back to the car: released, or the player drove off
     const carOk = !v.removed && v.health > 0 && !v.isUpsideDown();
     if (u.leaving || W.stars === 0 || (pveh && pveh.speed > 7 && carOk && c.pos.distanceTo(v.curPos) < 40)) {
@@ -795,12 +853,14 @@ export class PoliceManager {
     const dist = _d.length();
     _d.divideScalar(dist);
     const P = g.physics;
-    const pveh = pc.state === 'vehicle' ? pc.vehicle : null;
+    const pveh0 = pc.state === 'vehicle' ? pc.vehicle : null;
+    const pveh = pveh0 && !pveh0.isBike ? pveh0 : null; // a rider has no bodywork around him
     // something solid in between?
-    const block = P.raycast(muzzle, _d, dist - 0.4, groups(G.ALL, G.STATIC | (pveh ? 0 : G.CAR)), c.vehicle ? c.vehicle.body : null);
+    const block = P.raycast(muzzle, _d, dist - 0.4, groups(G.ALL, G.STATIC | (pveh0 ? 0 : G.CAR)), c.vehicle ? c.vehicle.body : null);
     let p = ACCURACY[W.stars] * clamp(1.25 - dist / 32, 0.3, 1);
     if (pc.state === 'foot' && pc.speedScalar > 4) p *= 0.6;
     if (pveh) p *= 0.75;
+    else if (pveh0) p *= clamp(1.1 - pveh0.speed / 40, 0.45, 1); // a fast bike is a hard target
     const hit = !block && this.rng() < p;
     let end;
     if (hit) {
@@ -811,7 +871,8 @@ export class PoliceManager {
         if (this.rng() < 0.3) g.effects.glass(chest, 0.2);
       } else {
         pc.damage(DAMAGE[W.stars], 'shot', c);
-        pc.pushVel.addScaledVector(_d, 0.8);
+        if (!pveh0) pc.pushVel.addScaledVector(_d, 0.8);
+        g.effects.bloodHit?.(chest, _d, 0.6);
         g.audio.bulletImpact(chest, true);
       }
       g.camRig.shake(0.12);

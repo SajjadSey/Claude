@@ -9,6 +9,9 @@ import { setMaxAnisotropy } from './world/textures.js';
 import { Character } from './char/character.js';
 import { PLAYER_APPEARANCE } from './char/rig.js';
 import { Vehicle } from './vehicle/vehicle.js';
+import { Bike, BIKE_TYPES } from './vehicle/bike.js';
+import { buildHeliModel } from './vehicle/heliModel.js';
+import { Heli, Searchlight } from './game/heli.js';
 import { Effects } from './vehicle/effects.js';
 import { TrafficManager, DriverAI } from './ai/traffic.js';
 import { PedManager } from './ai/peds.js';
@@ -43,6 +46,7 @@ const _v2 = new THREE.Vector3();
 class Game {
   constructor() {
     this.vehicles = [];
+    this.aircraft = [];
     this.characters = [];
     this.time = 0;
     this.paused = true;
@@ -116,6 +120,8 @@ class Game {
     // the player's first ride, parked right next to the spawn
     const car = this.addVehicle('sport', '#ff2d6f', _v.set(5.7, 0.06, 27), Math.PI, { persistent: true });
     this.player.lastVehicle = car;
+    // and a sport bike on its stand just behind it
+    this.addVehicle('sportbike', '#e10600', _v.set(5.9, 0.02, 20.6), Math.PI, { persistent: true });
     this.parked = new ParkedCars(this);
     this.parked.update(true);
     this.traffic = new TrafficManager(this);
@@ -140,12 +146,12 @@ class Game {
     this.loop = this.loop.bind(this);
     if (!window.__NC_TEST) requestAnimationFrame(this.loop);
     window.__game = this;
-    if (window.__NC_TEST) window.__mods = { EnterSequence, ExitSequence, Character, Vehicle, randomAppearance, THREE, DriverAI };
+    if (window.__NC_TEST) window.__mods = { EnterSequence, ExitSequence, Character, Vehicle, randomAppearance, THREE, DriverAI, buildHeliModel, Heli, WEAPONS };
   }
 
   /* ---------------------------------------------------------------- entities */
   addVehicle(type, color, pos, yaw, opts = {}) {
-    const v = new Vehicle(this, type, color, pos, yaw, opts);
+    const v = BIKE_TYPES[type] ? new Bike(this, type, color, pos, yaw, opts) : new Vehicle(this, type, color, pos, yaw, opts);
     this.vehicles.push(v);
     return v;
   }
@@ -213,6 +219,10 @@ class Game {
           v.ai.panic = 10;
           this.audio.horn(v.curPos, 1);
         }
+      } else if (a.type === 'heli' && a.heli) {
+        if (b && b.type === 'heli') continue;
+        a.heli.onImpact(impulse);
+        if (impulse > 1500 && !crashed) { crashed = true; this.audio.crash(point, impulse); this.effects.sparkBurst(point, dir, 10, 6); }
       } else if (a.type === 'ragdoll') {
         const ch = a.char;
         if (impulse > 160) {
@@ -262,6 +272,8 @@ class Game {
 
   onPedHit(ch, veh, speed) {
     this.peds.panic(ch.pos, 22, veh.curPos);
+    // hitting someone on a motorbike often throws the rider off too
+    if (veh.isBike && veh.driver && speed > 8 && Math.random() < 0.65) veh.crashPending = 'pedestrian';
     if (veh.driver === this.player.character) {
       this.camRig.shake(Math.min(0.3, speed / 60));
       this.police.crime(ch.isCop ? 'assaultCop' : 'hitPed', ch.pos);
@@ -314,6 +326,14 @@ class Game {
       this.police.crime(b.isCop ? 'assaultCop' : 'assault', b.pos);
     }
     if (b.ai && b.alive && Math.random() < 0.4 && a.isPlayer) b.ai.fight(a);
+  }
+
+  onBikeCrash(bike, rider, why) {
+    if (rider.isPlayer) {
+      this.camRig.shake(0.5);
+      this.hud.message('Crashed! · زمین خوردی', 1.6);
+    }
+    void why;
   }
 
   onExploded(v) {
@@ -382,6 +402,7 @@ class Game {
   /* ---------------------------------------------------------------- loop */
   prePhysics(h) {
     for (const v of this.vehicles) v.prePhysics(h);
+    for (const a of this.aircraft) a.prePhysics(h);
     for (const c of this.characters) if (c.ragdoll.active) c.ragdoll.prePhysics(h);
   }
 
@@ -437,6 +458,7 @@ class Game {
     if (steps >= 5) this.acc = 0;
 
     for (const v of this.vehicles) { v.update(dt); v.syncVisual(); }
+    for (let i = this.aircraft.length - 1; i >= 0; i--) { const a = this.aircraft[i]; a.syncVisual(dt); a.update(dt); }
     // characters far from the camera are animated at half rate
     this.frameNo = (this.frameNo || 0) + 1;
     const camP = this.camera.position;
@@ -445,7 +467,7 @@ class Game {
       const cd2 = camP.distanceToSquared(c.pos);
       const shadowOn = c.isPlayer || cd2 < 40 * 40;
       if (c.rig.mesh.castShadow !== shadowOn) c.rig.mesh.castShadow = shadowOn;
-      const far = !c.isPlayer && c.state !== 'ragdoll' && c.state !== 'seq' && cd2 > 45 * 45;
+      const far = !c.isPlayer && c.state !== 'ragdoll' && c.state !== 'seq' && c.state !== 'heli' && cd2 > 45 * 45;
       if (far && ((this.frameNo + c.id) & 1)) continue;
       c.update(Math.min(c.lodAcc, 0.1));
       c.lodAcc = 0;
@@ -459,7 +481,7 @@ class Game {
     this.env.update(dt, pc.ragdoll.active ? pc.ragdoll.hipsPosition(_v) : pc.pos);
     this.camRig.update(dt, input);
     this.weather.update(dt);
-    this.updateNightLights();
+    this.updateNightLights(dt);
     this.audio.setListener(this.camera);
     this.audio.update(dt, this);
     this.effects.update(dt, this.camera, this.scene, this.renderer.domElement.height);
@@ -503,9 +525,11 @@ class Game {
     }
   }
 
-  updateNightLights() {
+  updateNightLights(dt = 1 / 60) {
+    if (this.searchlight) this.searchlight.update(dt, this.night ? this.aircraft.find((a) => a.lightOn) : null);
     if (!this.night) return;
     if (!this.headlights) {
+      this.searchlight = new Searchlight(this);
       this.headlights = new THREE.Group();
       for (const s of [1, -1]) {
         const l = new THREE.SpotLight(0xfff1d6, 4000, 90, 0.52, 0.5, 2);
@@ -675,7 +699,7 @@ class ParkedCars {
     this.spots = game.city.parkingSpots.map((s) => ({ ...s, veh: null }));
     this.rng = makeRng(99);
     this.t = 0;
-    const types = ['sedan', 'sedan', 'suv', 'sport', 'muscle', 'taxi', 'sedan', 'suv'];
+    const types = ['sedan', 'sedan', 'suv', 'sport', 'muscle', 'taxi', 'sedan', 'suv', 'sportbike', 'cruiser'];
     for (const s of this.spots) s.type = this.rng.pick(types);
   }
   update(force) {
@@ -689,7 +713,7 @@ class ParkedCars {
       const d = Math.hypot(s.x - p.x, s.z - p.z);
       if (!s.veh && d < 85 && active < 16) {
         // avoid spawning into something
-        let clear = true;
+        let clear = !(g.police && g.police.roadblocks.blocks(s.x, s.z));
         for (const v of g.vehicles) if ((v.curPos.x - s.x) ** 2 + (v.curPos.z - s.z) ** 2 < 9) { clear = false; break; }
         if (!clear) continue;
         s.veh = g.addVehicle(s.type, null, _v.set(s.x, s.y + 0.06, s.z), s.yaw);

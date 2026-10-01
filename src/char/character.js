@@ -9,6 +9,30 @@ import RAPIER from '@dimforge/rapier3d-compat';
 const R_CharacterCollision = RAPIER.CharacterCollision;
 import { clamp, lerp, damp, approach, approachAngle, wrapAngle, smooth01, quatFromYaw, quatFromBasis, UP, makeRng } from '../core/util.js';
 import { WEAPONS, buildWeaponModel } from '../game/weapons.js';
+import { bikeRiderPose } from './bikeSequences.js';
+
+// motorcycle helmet (shared geometry, per-colour material)
+let HELMET_GEO = null;
+const HELMET_MATS = {};
+function makeHelmet(color) {
+  if (!HELMET_GEO) {
+    HELMET_GEO = {
+      shell: new THREE.SphereGeometry(0.128, 22, 16).scale(1, 1.02, 1.14).translate(0, 0.105, -0.008),
+      visor: new THREE.SphereGeometry(0.131, 18, 10, -0.95, 1.9, 1.05, 0.75).scale(1, 1.02, 1.14).translate(0, 0.1, -0.004),
+      chin: new THREE.TorusGeometry(0.085, 0.03, 8, 16, Math.PI).rotateX(Math.PI / 2).rotateZ(Math.PI).translate(0, 0.02, 0.04),
+    };
+    for (const g of Object.values(HELMET_GEO)) g.userData.shared = true;
+    HELMET_MATS.visor = new THREE.MeshStandardMaterial({ color: 0x0b0f14, metalness: 0.6, roughness: 0.08 });
+  }
+  if (!HELMET_MATS[color]) HELMET_MATS[color] = new THREE.MeshPhysicalMaterial({ color, roughness: 0.25, metalness: 0.2, clearcoat: 1, clearcoatRoughness: 0.05 });
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(HELMET_GEO.shell, HELMET_MATS[color]);
+  shell.castShadow = true;
+  g.add(shell, new THREE.Mesh(HELMET_GEO.visor, HELMET_MATS.visor), new THREE.Mesh(HELMET_GEO.chin, HELMET_MATS[color]));
+  g.visible = false;
+  return g;
+}
+const HELMET_COLORS = ['#111111', '#e5e7eb', '#b91c1c', '#1d4ed8', '#f59e0b', '#16a34a', '#7c3aed'];
 
 export const SPEEDS = { walk: 1.45, run: 5.1, sprint: 7.6 };
 
@@ -149,16 +173,31 @@ export class Character {
   update(dt) {
     if (this.removed) return;
     this.time += dt;
+    this.helmetOn = false;
     switch (this.state) {
       case 'foot': this.updateFoot(dt); break;
       case 'seq': if (this.seq) this.seq.update(dt); break;
       case 'vehicle': this.updateSeated(dt); break;
       case 'ragdoll': case 'dead': this.updateRagdoll(dt); break;
       case 'getup': this.updateGetUp(dt); break;
+      case 'heli': if (this.heliCrew) this.heliCrew.heli.poseCrew(this, dt); break;
       default: break;
     }
     this.applyBlend(dt);
     this.applyHandIK();
+    this.updateHelmet(dt);
+  }
+
+  /** Helmet while riding (kept on for a while after coming off the bike). */
+  updateHelmet(dt) {
+    if (this.helmetT > 0) this.helmetT -= dt;
+    const on = this.helmetOn || this.helmetT > 0;
+    if (!on && !this.helmet) return;
+    if (!this.helmet) {
+      this.helmet = makeHelmet(HELMET_COLORS[(this.app.seed || this.id) % HELMET_COLORS.length]);
+      this.rig.bones.head.add(this.helmet);
+    }
+    this.helmet.visible = on;
   }
 
   startBlend(dur, wf = null) {
@@ -603,6 +642,8 @@ export class Character {
     if (source && (source.isPlayer || (source.driver && source.driver.isPlayer))) this.lastPlayerHitT = this.game.time;
     this.health -= amount;
     this.lastDamageCause = cause;
+    // nothing between a rider and the bullet: shot riders often come off
+    if (this.health > 0 && this.state === 'vehicle' && this.vehicle && this.vehicle.isBike && this.vehicle.driver === this) this.vehicle.onRiderHit?.(amount, cause, this);
     if (this.health <= 0) {
       this.health = 0;
       this.alive = false;
@@ -755,6 +796,7 @@ export class Character {
     this.vehicle = veh;
     this.seatSide = side;
     if (side === 1) veh.driver = this; else veh.passengers.push(this);
+    if (veh.isBike) { veh.setRiderCollider(true); veh.standDown = false; veh.body.wakeUp(); }
     this.state = 'vehicle';
     this.setCapsuleEnabled(false);
     this.vel.set(0, 0, 0);
@@ -763,6 +805,7 @@ export class Character {
   leaveVehicleInstant() {
     const veh = this.vehicle;
     if (!veh) return;
+    if (veh.isBike) { veh.setRiderCollider(false); this.helmetT = 8; }
     if (veh.driver === this) veh.driver = null;
     veh.passengers = veh.passengers.filter((p) => p !== this);
     this.vehicle = null;
@@ -779,6 +822,11 @@ export class Character {
   updateSeated(dt) {
     const veh = this.vehicle;
     if (!veh || veh.removed) { this.leaveVehicleInstant(); this.state = 'foot'; this.setCapsuleEnabled(true); return; }
+    if (veh.isBike) {
+      this.driveByPose(veh);
+      bikeRiderPose(this, veh, dt);
+      return;
+    }
     this.seatRoot(veh, this.seatSide, this.rig.root.position, this.rig.root.quaternion);
     this.pos.copy(this.rig.root.position);
     this.pos.y += this.rig.L.hipsY - 0.4;
