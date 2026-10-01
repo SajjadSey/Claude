@@ -237,6 +237,54 @@ export class AudioSys {
     this.noiseBurst(pos, { dur: 0.14, type: 'bandpass', freq: 4200, q: 4, gain: 0.25, sweep: 0.4, ref: 3, max: 15 });
   }
 
+  /* ------------------------------------------------------------- rain & thunder */
+  makeRain() {
+    const ctx = this.ctx;
+    const r = {};
+    r.src = ctx.createBufferSource();
+    r.src.buffer = this.noise;
+    r.src.loop = true;
+    r.hp = ctx.createBiquadFilter(); r.hp.type = 'highpass'; r.hp.frequency.value = 350;
+    r.lp = ctx.createBiquadFilter(); r.lp.type = 'lowpass'; r.lp.frequency.value = 6500;
+    r.g = ctx.createGain(); r.g.gain.value = 0;
+    r.src.connect(r.hp).connect(r.lp).connect(r.g).connect(this.sfx);
+    // a low wash under the hiss
+    r.src2 = ctx.createBufferSource();
+    r.src2.buffer = this.brown;
+    r.src2.loop = true;
+    r.g2 = ctx.createGain(); r.g2.gain.value = 0;
+    r.src2.connect(r.g2).connect(this.sfx);
+    r.src.start(); r.src2.start();
+    r.tick = 0;
+    return r;
+  }
+  setRain(k, inCar) {
+    if (!this.ready) return;
+    if (!this.rainS) { if (k < 0.01) return; this.rainS = this.makeRain(); }
+    const r = this.rainS, t = this.ctx.currentTime;
+    r.g.gain.setTargetAtTime(this.muted ? 0 : k * (inCar ? 0.09 : 0.2), t, 0.3);
+    r.lp.frequency.setTargetAtTime(inCar ? 1300 : 6500, t, 0.2);
+    r.g2.gain.setTargetAtTime(this.muted ? 0 : k * (inCar ? 0.32 : 0.12), t, 0.3);
+    // drops drumming on the roof of the car
+    if (inCar && k > 0.05) {
+      r.tick -= 1 / 60;
+      if (r.tick <= 0) {
+        r.tick = 0.012 + Math.random() * 0.05 / k;
+        this.noiseBurst(null, { dur: 0.02, type: 'bandpass', freq: 1800 + Math.random() * 2500, q: 3, gain: 0.05 * k });
+      }
+    }
+  }
+  thunder(delay, k = 1) {
+    if (!this.ready) return;
+    setTimeout(() => {
+      if (!this.ready || this.muted) return;
+      if (k > 0.8) this.noiseBurst(null, { dur: 0.35, type: 'highpass', freq: 1200, gain: 0.35 * k });
+      this.noiseBurst(null, { dur: 4.2, type: 'lowpass', freq: 220, gain: 1.1 * k, attack: 0.05, sweep: 0.4 });
+      this.noiseBurst(null, { dur: 2.6, type: 'lowpass', freq: 700, gain: 0.4 * k, attack: 0.02, sweep: 0.3 });
+      this.tone(null, { freq: 42, dur: 3, gain: 0.45 * k, slide: 0.7 });
+    }, delay * 1000);
+  }
+
   /* ------------------------------------------------------------- police siren (nearest car) */
   makeSiren() {
     const ctx = this.ctx;

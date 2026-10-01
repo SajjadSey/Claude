@@ -223,6 +223,8 @@ export class Effects {
     this.sparks = new ParticlePool(scene, 900, sparkTexture(), THREE.AdditiveBlending, -9.8);
     this.debris = new ParticlePool(scene, 700, sparkTexture(), THREE.NormalBlending, -9.8);
     this.fireP = new ParticlePool(scene, 900, smokeTexture(), THREE.AdditiveBlending, 0);
+    this.splash = new ParticlePool(scene, 1600, sparkTexture(), THREE.NormalBlending, -9.8);
+    this.blood = new ParticlePool(scene, 900, smokeTexture(), THREE.NormalBlending, -9.8);
     this.skids = new SkidMarks(scene);
     this.emitters = [];
   }
@@ -279,6 +281,44 @@ export class Effects {
       _c.setRGB(1, 0.75 + Math.random() * 0.2, 0.4);
       this.sparks.spawn(p, _v, 0.25 + Math.random() * 0.45, 0.12, 0.05, 1, _c, 0.6, 1);
     }
+  }
+
+  /** Raindrops bouncing off a surface. */
+  rainSplash(p, k = 1, bright = 1) {
+    const n = Math.random() < 0.5 ? 2 : 3;
+    _c.setRGB(0.78 * bright, 0.83 * bright, 0.9 * bright);
+    for (let i = 0; i < n; i++) {
+      _v.set((Math.random() - 0.5) * 1.4, 0.7 + Math.random() * 1.3 * k, (Math.random() - 0.5) * 1.4);
+      _v2.set(p.x, p.y + 0.02, p.z);
+      this.splash.spawn(_v2, _v, 0.16 + Math.random() * 0.14, 0.035, 0.02, 0.5, _c, 0.2, 1);
+    }
+  }
+
+  /** Spray thrown up behind a tyre on a wet road. */
+  spray(p, vel, k) {
+    _v.set(-vel.x * 0.15 + (Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 0.9, -vel.z * 0.15 + (Math.random() - 0.5) * 1.2);
+    _v2.set(p.x + (Math.random() - 0.5) * 0.25, p.y + 0.12, p.z + (Math.random() - 0.5) * 0.25);
+    _c.setRGB(0.82, 0.85, 0.88);
+    this.smoke.spawn(_v2, _v, 0.6 + Math.random() * 0.5, 0.35, 1.9, 0.16 * k, _c, 1.6, 0);
+  }
+
+  /** Blood spray from a bullet wound. */
+  bloodHit(p, dir, k = 1) {
+    for (let i = 0; i < 7 * k; i++) {
+      _v.set(dir.x * 2.2 + (Math.random() - 0.5) * 1.6, dir.y * 2 + Math.random() * 1.4, dir.z * 2.2 + (Math.random() - 0.5) * 1.6);
+      _c.setRGB(0.45 + Math.random() * 0.15, 0.02, 0.03);
+      this.blood.spawn(p, _v, 0.3 + Math.random() * 0.35, 0.05, 0.1, 0.9, _c, 0.5, 1);
+    }
+    _c.setRGB(0.4, 0.03, 0.04);
+    _v.set(dir.x * 0.4, 0.2, dir.z * 0.4);
+    this.blood.spawn(p, _v, 0.5, 0.12, 0.35, 0.45, _c, 2.5, 0.1);
+  }
+
+  /** Brass shell ejected from a gun. */
+  shell(p, side, up) {
+    _v.set(side.x * (1.6 + Math.random()) + up.x, 1.4 + Math.random() * 0.8, side.z * (1.6 + Math.random()) + up.z);
+    _c.setRGB(0.85, 0.65, 0.25);
+    this.debris.spawn(p, _v, 0.9, 0.035, 0.035, 1, _c, 0.15, 1);
   }
 
   /** Pistol muzzle flash. */
@@ -360,6 +400,8 @@ export class Effects {
     this.fireP.update(dt, camera, scene, height);
     this.sparks.update(dt, camera, scene, height);
     this.debris.update(dt, camera, scene, height);
+    this.splash.update(dt, camera, scene, height);
+    this.blood.update(dt, camera, scene, height);
     this.skids.flush();
   }
 }

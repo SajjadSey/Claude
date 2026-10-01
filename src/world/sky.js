@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { waterNormalTexture } from './textures.js';
-import { DEG, lerp } from '../core/util.js';
+import { DEG, lerp, clamp } from '../core/util.js';
+
+const _c = new THREE.Color();
+const _c2 = new THREE.Color();
 
 const PRESETS = {
   golden: {
@@ -112,14 +115,52 @@ export class Environment {
     this.scene.fog.far = p.fogFar;
     this.renderer.toneMappingExposure = p.exposure;
     this.night = p.night;
+    this.ovK = -1;
+    this.envK = -1;
+    this.setOvercast(this.overcast || 0);
+    if (this.onChange) this.onChange(p);
+  }
+
+  /**
+   * Blend the current time of day towards an overcast, rainy sky (k = 0..1): weaker sun, flat
+   * diffuse light, grey fog closing in, and a greyer reflection environment (rebuilt in steps).
+   */
+  setOvercast(k) {
+    const p = this.preset;
+    if (!p) return;
+    k = clamp(k, 0, 1);
+    this.overcast = k;
+    if (Math.abs(k - this.ovK) < 0.002) return;
+    this.ovK = k;
+    const u = this.sky.material.uniforms;
+    u.turbidity.value = lerp(p.turbidity, 16, k);
+    u.rayleigh.value = lerp(p.rayleigh, 0.25, k);
+    u.mieCoefficient.value = lerp(p.mie, 0.02, k);
+    this.sun.intensity = p.sunI * (1 - 0.94 * k);
+    this.hemi.intensity = p.hemiI * (1 + (p.night ? 0.25 : 1.6) * k);
+    this.hemi.color.set(p.hemiSky).lerp(_c.set(p.night ? 0x2a3040 : 0xb8bec6), k);
+    this.scene.fog.color.set(p.fog).lerp(_c.set(p.night ? 0x0d1118 : 0x8e969e), k);
+    this.scene.fog.near = lerp(p.fogNear, 18, k);
+    this.scene.fog.far = lerp(p.fogFar, 300, k);
+    this.renderer.toneMappingExposure = p.exposure * (1 + 0.12 * k);
+    const step = Math.abs(k - this.envK);
+    if (this.envK < 0 || step > 0.12 || (step > 0.001 && (k === 0 || k === 1))) this.buildEnv(k);
+  }
+
+  buildEnv(k) {
+    const p = this.preset;
+    this.envK = k;
+    const grey = p.night ? 0x10141c : 0x9aa1a8;
     // Environment map: a controlled gradient dome (the raw sky shader's sun disk would flood the scene)
     const envScene = new THREE.Scene();
     const domeMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        top: { value: new THREE.Color(p.envTop) }, horizon: { value: new THREE.Color(p.envHorizon) },
-        ground: { value: new THREE.Color(p.envGround) }, sunCol: { value: new THREE.Color(p.envSun) },
+        top: { value: new THREE.Color(p.envTop).lerp(_c2.set(grey).multiplyScalar(0.8), k) },
+        horizon: { value: new THREE.Color(p.envHorizon).lerp(_c2.set(grey), k) },
+        ground: { value: new THREE.Color(p.envGround).lerp(_c2.set(grey).multiplyScalar(0.5), k * 0.6) },
+        sunCol: { value: new THREE.Color(p.envSun).multiplyScalar(1 - 0.9 * k) },
         sunDir: { value: this.sunDir.clone() }, k: { value: p.envI },
       },
       vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
@@ -136,7 +177,6 @@ export class Environment {
     this.scene.environmentIntensity = 1.0;
     dome.geometry.dispose();
     domeMat.dispose();
-    if (this.onChange) this.onChange(p);
   }
 
   cycle() {

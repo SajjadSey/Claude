@@ -23,6 +23,9 @@ export class PedAI {
     this.idleT = 0;
     this.repath = 0;
     this.lookT = 0;
+    // rain behaviour: some carry an umbrella, the rest hurry (a few jog)
+    this.hasUmbrella = this.rng() < 0.55;
+    this.rainJog = this.rng() < 0.3;
     ch.ai = this;
   }
 
@@ -58,8 +61,10 @@ export class PedAI {
 
   update(dt) {
     const c = this.c;
-    if (c.state !== 'foot') return;
     const g = this.game;
+    const raining = g.weather ? g.weather.rain > 0.2 : false;
+    c.umbrellaOn = raining && this.hasUmbrella && (this.mode === 'walk' || this.mode === 'wait');
+    if (c.state !== 'foot') return;
     const nodes = g.city.pedNodes;
     let dirX = 0, dirZ = 0, mag = 0, mode = 'walk';
     if (this.mode === 'flee') {
@@ -108,6 +113,9 @@ export class PedAI {
       if (d < 0.9) this.arrive();
       _v.normalize();
       dirX = _v.x; dirZ = _v.z; mag = this.speedK;
+      if (raining && !this.hasUmbrella) {
+        if (this.rainJog) { mode = 'run'; mag = 0.52; } else mag *= 1.25;
+      }
       // idle pauses (looking around)
       if (this.idleT > 0) { this.idleT -= dt; mag = 0; }
       else if (this.rng() < dt * 0.01) this.idleT = this.rng.range(1.5, 4);

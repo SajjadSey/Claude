@@ -31,6 +31,31 @@ let CHAR_ID = 1;
 
 // service pistol, built once and shared (hand-local: barrel along -Y, slide on the thumb side +Z)
 let GUN_PARTS = null;
+// umbrella for pedestrians in the rain (grip at the origin, canopy above)
+let UMB_GEO = null;
+const UMB_MATS = {};
+const UMB_COLORS = ['#141418', '#1d2a4d', '#8c1c24', '#e1b52c', '#2f6b3a', '#5a2d6e', '#d8d8d8', '#c2410c'];
+function makeUmbrella(seed) {
+  if (!UMB_GEO) {
+    UMB_GEO = {
+      canopy: new THREE.ConeGeometry(0.56, 0.24, 8, 1, true).translate(0, 0.76, 0),
+      shaft: new THREE.CylinderGeometry(0.008, 0.008, 0.86, 6).translate(0, 0.38, 0),
+      tip: new THREE.CylinderGeometry(0.004, 0.009, 0.08, 6).translate(0, 0.91, 0),
+      handle: new THREE.TorusGeometry(0.035, 0.008, 5, 10, Math.PI).rotateZ(Math.PI).translate(0.035, -0.04, 0),
+    };
+    for (const g of Object.values(UMB_GEO)) g.userData.shared = true;
+    UMB_MATS.dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5, metalness: 0.4 });
+  }
+  const col = UMB_COLORS[seed % UMB_COLORS.length];
+  if (!UMB_MATS[col]) UMB_MATS[col] = new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, side: THREE.DoubleSide });
+  const g = new THREE.Group();
+  const canopy = new THREE.Mesh(UMB_GEO.canopy, UMB_MATS[col]);
+  canopy.castShadow = true;
+  g.add(canopy, new THREE.Mesh(UMB_GEO.shaft, UMB_MATS.dark), new THREE.Mesh(UMB_GEO.tip, UMB_MATS.dark), new THREE.Mesh(UMB_GEO.handle, UMB_MATS.dark));
+  g.visible = false;
+  return g;
+}
+
 function makeGun() {
   if (!GUN_PARTS) {
     const metal = new THREE.MeshStandardMaterial({ color: 0x1b1c20, roughness: 0.45, metalness: 0.7 });
@@ -83,6 +108,9 @@ export class Character {
     this.aimW = 0;
     this.handsUp = false;
     this.handsUpW = 0;
+    this.umbrellaOn = false;
+    this.umbW = 0;
+    this.umbrella = null;
     this.lastDamageT = -99;
     this.lastPlayerHitT = -99;
     this.loco = new Locomotion(this);
@@ -349,6 +377,30 @@ export class Character {
       // shoulders square up to the target
       _q.setFromAxisAngle(UP, yawErr * 0.35 * w);
       rig.bones.chest.quaternion.multiply(_q);
+    }
+    // umbrella held overhead (pedestrians in the rain)
+    this.umbW = approach(this.umbW, this.umbrellaOn && this.state === 'foot' && this.aimW < 0.05 ? 1 : 0, dt * 2.5);
+    if (this.umbW > 0.001 || (this.umbrella && this.umbrella.visible)) {
+      if (!this.umbrella) { this.umbrella = makeUmbrella(this.app.seed || this.id); rig.root.add(this.umbrella); }
+      const w = this.umbW;
+      _e.set(-0.55, 0, -0.2, 'XYZ');
+      _q.setFromEuler(_e);
+      rig.bones.upperArmR.quaternion.slerp(_q, w);
+      _e.set(-1.85, 0.25, 0, 'XYZ');
+      _q.setFromEuler(_e);
+      rig.bones.forearmR.quaternion.slerp(_q, w);
+      _q.setFromAxisAngle(_zAxis, 1.4);
+      rig.bones.fingersR.quaternion.slerp(_q, w);
+      this.umbrella.visible = w > 0.35;
+      if (this.umbrella.visible) {
+        rig.root.updateMatrixWorld(true);
+        rig.bones.handR.getWorldPosition(_v2);
+        rig.root.worldToLocal(_v2);
+        this.umbrella.position.copy(_v2);
+        this.umbrella.position.y -= 0.02;
+        this.umbrella.rotation.set(0.1 + this.speedScalar * 0.05, 0, -0.06);
+        this.umbrella.scale.setScalar(Math.min(1, w * 1.4 - 0.35) * 0.97 + 0.03);
+      }
     }
     this.handsUpW = approach(this.handsUpW, this.handsUp && (this.state === 'foot') ? 1 : 0, dt * 4);
     if (this.handsUpW > 0.001) {

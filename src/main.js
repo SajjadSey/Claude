@@ -18,6 +18,7 @@ import { HUD } from './game/hud.js';
 import { PlayerController } from './game/player.js';
 import { Explosions } from './game/explosions.js';
 import { PoliceManager } from './game/police.js';
+import { Weather } from './world/weather.js';
 import { EnterSequence, ExitSequence } from './char/carSequences.js';
 import { randomAppearance } from './char/rig.js';
 
@@ -98,6 +99,7 @@ class Game {
     this.env.build(q);
 
     this.effects = new Effects(this.scene);
+    this.weather = new Weather(this);
     this.props = new Props(this);
     this.props.spawnAll(this.city.props);
     this.audio = new AudioSys();
@@ -410,6 +412,7 @@ class Game {
     this.time += dt;
     this.autoQuality();
     if (input.hit('KeyN')) { this.env.cycle(); this.hud.message(`Time: ${this.env.presetName}`, 1.5); }
+    if (input.hit('KeyK')) this.weather.cycle();
     if (input.hit('KeyM')) { this.audio.radioOn = !this.audio.radioOn; this.hud.message(this.audio.radioOn ? '📻 Radio ON' : '📻 Radio OFF', 1.2); }
     if (input.hit('F3') || input.hit('KeyP')) this.hud.showFps = !this.hud.showFps;
     if (input.hit('F2')) this.cycleQuality();
@@ -452,6 +455,7 @@ class Game {
     const pc = this.player.character;
     this.env.update(dt, pc.ragdoll.active ? pc.ragdoll.hipsPosition(_v) : pc.pos);
     this.camRig.update(dt, input);
+    this.weather.update(dt);
     this.updateNightLights();
     this.audio.setListener(this.camera);
     this.audio.update(dt, this);
@@ -471,13 +475,18 @@ class Game {
       const d2 = v.curPos.distanceToSquared(cam);
       if (d2 > 150 * 150) continue;
       const vel = v.linvel(_v);
+      const wet = this.weather.wet;
+      const sprayK = wet > 0.2 && v.speed > 6 ? clamp((v.speed - 6) / 20, 0, 1) * wet : 0;
       for (const w of v.wheels) {
+        if (sprayK > 0 && w.grounded && (w.surface === 'asphalt' || w.surface === 'concrete') && Math.random() < dt * 40 * sprayK) {
+          this.effects.spray(w.contact, vel, sprayK);
+        }
         if (w.grounded && w.skidding > 0.12) {
-          if (Math.random() < w.skidding * dt * 32) this.effects.tireSmoke(w.contact, vel, w.skidding, w.surface);
+          if (Math.random() < w.skidding * dt * 32 * (1 - 0.75 * wet)) this.effects.tireSmoke(w.contact, vel, w.skidding, w.surface);
           if (w.surface === 'asphalt' || w.surface === 'concrete') {
             if (w.lastSkidPos) {
               if (w.lastSkidPos.distanceToSquared(w.contact) > 0.04) {
-                this.effects.skids.add(w.lastSkidPos, w.contact, v.T.wheelW * 0.95, Math.min(0.85, w.skidding * 1.2));
+                this.effects.skids.add(w.lastSkidPos, w.contact, v.T.wheelW * 0.95, Math.min(0.85, w.skidding * 1.2) * (1 - 0.6 * wet));
                 w.lastSkidPos.copy(w.contact);
               }
             } else w.lastSkidPos = w.contact.clone();

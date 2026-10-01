@@ -4,6 +4,8 @@ import { clamp, lerp, damp, approach, smoothstep, invLerp } from '../core/util.j
 import { buildCarModel, CAR_TYPES } from './carModel.js';
 
 const SURFACE_GRIP = { asphalt: 1.0, concrete: 0.95, metal: 0.85, wood: 0.85, grass: 0.62, sand: 0.55, dirt: 0.65, flesh: 0.6, car: 0.7 };
+// grip lost when the surface is fully wet
+const WET_LOSS = { asphalt: 0.28, concrete: 0.3, metal: 0.38, wood: 0.32, grass: 0.2, sand: 0.06, dirt: 0.3, flesh: 0.1, car: 0.3 };
 
 const _q = new THREE.Quaternion();
 const _qi = new THREE.Quaternion();
@@ -309,6 +311,7 @@ export class Vehicle {
 
     // ------------------------------------------------ per-wheel forces
     let slipSum = 0;
+    const wet = this.game.weather ? this.game.weather.wet : 0;
     const driven = [2, 3];
     const brakeTotal = brake * T.brake;
     for (let i = 0; i < 4; i++) {
@@ -342,7 +345,7 @@ export class Vehicle {
       }
       const vLong = _v.dot(_wf);
       const vLat = _v.dot(_ws);
-      const surf = SURFACE_GRIP[w.surface] ?? 0.9;
+      const surf = (SURFACE_GRIP[w.surface] ?? 0.9) * (1 - wet * (WET_LOSS[w.surface] ?? 0.25));
       let mu = (w.front ? T.grip : T.rearGrip) * surf;
       // load sensitivity
       const nominal = T.mass * 9.81 / 4;
@@ -499,7 +502,8 @@ export class Vehicle {
     this.brakeLight = damp(this.brakeLight, braking ? 1 : 0, 20, dt);
     const night = this.game.night ? 1 : 0;
     const occupied = !!this.driver;
-    const headOn = (occupied && (night || this.lightsOn)) && !this.headBroken;
+    const rainy = this.game.weather ? this.game.weather.rain > 0.3 : false;
+    const headOn = (occupied && (night || this.lightsOn || rainy)) && !this.headBroken;
     L.head.emissiveIntensity = this.headBroken ? 0 : headOn ? 3.2 : occupied ? 0.5 : 0.08;
     L.tail.emissiveIntensity = this.tailBroken ? 0 : (occupied ? (night ? 1.4 : 0.6) : 0.05) + this.brakeLight * 3.5;
     L.reverse.emissiveIntensity = this.reverse && occupied ? 2.0 : 0;
