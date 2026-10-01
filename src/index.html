@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon Coast</title>
+<style>
+  :root { --pink: #ff2d6f; --cyan: #2de2e6; --ink: #0b0d18; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: "Segoe UI", Tahoma, system-ui, sans-serif; color: #fff; user-select: none; }
+  #game { position: fixed; inset: 0; }
+  #game canvas { display: block; width: 100%; height: 100%; }
+  #hud { position: fixed; inset: 0; pointer-events: none; }
+  #minimap-wrap { position: absolute; left: 22px; bottom: 22px; width: 220px; }
+  #minimap { width: 220px; height: 220px; border-radius: 50%; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+  #health { margin: 10px auto 0; width: 180px; height: 8px; background: rgba(0,0,0,.5); border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.25); }
+  #health-fill { height: 100%; width: 100%; background: #4cd964; transition: width .25s; }
+  #speedo { position: absolute; right: 22px; bottom: 16px; transition: opacity .3s; opacity: 0; }
+  #speedo canvas { width: 220px; height: 220px; }
+  #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); padding: 10px 18px; background: rgba(0,0,0,.55); border-radius: 8px; font-size: 16px; opacity: 0; transition: opacity .2s; white-space: nowrap; border-left: 3px solid var(--pink); }
+  #msg { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-size: 22px; font-weight: 600; text-shadow: 0 2px 8px #000; opacity: 0; transition: opacity .4s; white-space: nowrap; }
+  #vehname { position: absolute; right: 40px; bottom: 250px; font-size: 26px; font-weight: 700; font-style: italic; color: #fff; text-shadow: 0 0 12px var(--pink), 0 2px 4px #000; opacity: 0; transition: opacity .6s; }
+  #wasted { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: 96px; font-weight: 900; letter-spacing: 6px; color: #c8102e; text-shadow: 0 4px 0 #000, 0 0 30px rgba(0,0,0,.8); opacity: 0; transition: opacity 1s; font-family: "Impact", "Arial Black", sans-serif; }
+  #fps { position: absolute; left: 12px; top: 10px; font: 12px monospace; background: rgba(0,0,0,.5); padding: 3px 7px; border-radius: 4px; display: none; }
+  #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 30% 20%, rgba(255,45,111,.35), transparent 60%), radial-gradient(ellipse at 80% 90%, rgba(45,226,230,.28), transparent 55%), rgba(6,6,16,.82); backdrop-filter: blur(3px); z-index: 10; }
+  .panel { width: min(980px, 94vw); max-height: 92vh; overflow: auto; padding: 28px 34px; border-radius: 18px; background: rgba(12,12,26,.78); box-shadow: 0 20px 60px rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.08); }
+  h1 { margin: 0; font-size: 64px; font-style: italic; font-weight: 900; letter-spacing: 2px; background: linear-gradient(90deg, #ff2d6f, #ff9f43 45%, #2de2e6); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 18px rgba(255,45,111,.45)); }
+  .sub { opacity: .8; margin: 4px 0 18px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 34px; }
+  .cols h3 { margin: 6px 0 8px; color: var(--cyan); font-size: 15px; letter-spacing: 1px; text-transform: uppercase; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td { padding: 3px 0; vertical-align: top; }
+  td.k { width: 120px; }
+  kbd { display: inline-block; min-width: 18px; padding: 1px 6px; margin: 0 2px 2px 0; border-radius: 4px; background: #222538; border: 1px solid #3a3f5c; border-bottom-width: 3px; font: 12px "Segoe UI", sans-serif; text-align: center; }
+  .fa { direction: rtl; text-align: right; font-family: Tahoma, "Segoe UI", sans-serif; opacity: .9; font-size: 13.5px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+  button { pointer-events: auto; cursor: pointer; border: 0; border-radius: 10px; padding: 12px 22px; font-size: 16px; font-weight: 700; color: #fff; background: #2a2d45; }
+  button:hover { filter: brightness(1.2); }
+  #start { display: none; background: linear-gradient(90deg, #ff2d6f, #ff7a3d); font-size: 20px; padding: 14px 34px; box-shadow: 0 6px 24px rgba(255,45,111,.45); }
+  #loading { margin-top: 18px; }
+  #load-bar { height: 8px; width: 360px; max-width: 80vw; background: #222; border-radius: 4px; overflow: hidden; }
+  #load-fill { height: 100%; width: 0; background: linear-gradient(90deg, #ff2d6f, #2de2e6); transition: width .3s; }
+  #load-text { font-size: 13px; opacity: .8; margin-top: 6px; }
+  label { font-size: 14px; display: flex; gap: 8px; align-items: center; }
+  input[type=range] { width: 120px; }
+  .note { font-size: 12px; opacity: .55; margin-top: 14px; }
+  @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } h1 { font-size: 44px; } }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+  <div id="fps"></div>
+  <div id="minimap-wrap"><canvas id="minimap" width="220" height="220"></canvas><div id="health"><div id="health-fill"></div></div></div>
+  <div id="speedo"><canvas id="speedo-c" width="220" height="220"></canvas></div>
+  <div id="prompt"></div>
+  <div id="msg"></div>
+  <div id="vehname"></div>
+  <div id="wasted">WASTED</div>
+</div>
+<div id="menu">
+  <div class="panel">
+    <h1>NEON COAST</h1>
+    <div class="sub">An open-world sandbox: physics-driven cars, procedural character animation and full-body ragdolls.<span class="fa" style="display:block">یک بازی جهان‌باز با فیزیک واقعی ماشین، انیمیشن پروسیجرال کاراکتر و ردگال کامل بدن</span></div>
+    <div class="cols">
+      <div>
+        <h3>On foot · پیاده</h3>
+        <table>
+          <tr><td class="k"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move (camera relative) · حرکت</td></tr>
+          <tr><td class="k"><kbd>Shift</kbd></td><td>Sprint · دویدن سریع</td></tr>
+          <tr><td class="k"><kbd>C</kbd></td><td>Toggle walk / jog · راه رفتن/دویدن</td></tr>
+          <tr><td class="k"><kbd>Space</kbd></td><td>Jump · پرش</td></tr>
+          <tr><td class="k">Mouse · <kbd>Q</kbd></td><td>Look · Left click / Q = punch · مشت</td></tr>
+          <tr><td class="k"><kbd>F</kbd></td><td>Enter / hijack car (opens door, pulls driver out) · سوار شدن / دزدیدن ماشین</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Driving · رانندگی</h3>
+        <table>
+          <tr><td class="k"><kbd>W</kbd> / <kbd>S</kbd></td><td>Throttle / brake &amp; reverse · گاز / ترمز و دنده عقب</td></tr>
+          <tr><td class="k"><kbd>A</kbd> / <kbd>D</kbd></td><td>Steer · فرمان</td></tr>
+          <tr><td class="k"><kbd>Space</kbd></td><td>Handbrake (drift!) · ترمز دستی (دریفت)</td></tr>
+          <tr><td class="k"><kbd>F</kbd></td><td>Exit (at speed = bail out) · پیاده شدن</td></tr>
+          <tr><td class="k"><kbd>H</kbd> <kbd>V</kbd> <kbd>L</kbd></td><td>Horn · look back · lights · بوق / نگاه عقب / چراغ</td></tr>
+          <tr><td class="k"><kbd>R</kbd></td><td>Flip car upright · برگرداندن ماشین</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>World · دنیا</h3>
+        <table>
+          <tr><td class="k"><kbd>N</kbd></td><td>Golden hour / noon / night · تغییر زمان روز</td></tr>
+          <tr><td class="k"><kbd>M</kbd></td><td>Car radio on/off · رادیو</td></tr>
+          <tr><td class="k"><kbd>F2</kbd> <kbd>P</kbd></td><td>Graphics quality · FPS counter</td></tr>
+          <tr><td class="k"><kbd>Esc</kbd></td><td>Pause · توقف</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Gamepad · دسته</h3>
+        <table>
+          <tr><td>LS move/steer · RT gas · LT brake · RB/A handbrake · Y enter/exit · X jump · B punch · RS camera</td></tr>
+        </table>
+      </div>
+    </div>
+    <div class="row">
+      <button id="start">Play · شروع بازی</button>
+      <button id="quality">Graphics</button>
+      <button id="mute">Sound: ON</button>
+      <label>Mouse <input id="sens" type="range" min="0.3" max="2.5" step="0.1"></label>
+      <label><input id="invert" type="checkbox"> Invert Y</label>
+    </div>
+    <div id="loading"><div id="load-bar"><div id="load-fill"></div></div><div id="load-text">Loading…</div></div>
+    <div class="note">Original game inspired by open-world crime classics. All graphics, sounds and code are procedurally generated — no external assets.</div>
+  </div>
+</div>
+<!--GAME_SCRIPT-->
+</body>
+</html>

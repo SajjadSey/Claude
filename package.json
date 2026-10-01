@@ -1,0 +1,18 @@
+{
+  "name": "neon-coast",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Open-world 3D driving & on-foot sandbox with physics-driven cars, procedural character animation and ragdolls.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --dev"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
