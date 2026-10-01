@@ -20,6 +20,15 @@
   #msg { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-size: 22px; font-weight: 600; text-shadow: 0 2px 8px #000; opacity: 0; transition: opacity .4s; white-space: nowrap; }
   #vehname { position: absolute; right: 40px; bottom: 250px; font-size: 26px; font-weight: 700; font-style: italic; color: #fff; text-shadow: 0 0 12px var(--pink), 0 2px 4px #000; opacity: 0; transition: opacity .6s; }
   #wasted { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: 96px; font-weight: 900; letter-spacing: 6px; color: #c8102e; text-shadow: 0 4px 0 #000, 0 0 30px rgba(0,0,0,.8); opacity: 0; transition: opacity 1s; font-family: "Impact", "Arial Black", sans-serif; }
+  #wanted { position: absolute; right: 26px; top: 16px; font-size: 34px; letter-spacing: 4px; font-family: "Segoe UI Symbol", "Segoe UI", sans-serif; }
+  #wanted span { color: rgba(255,255,255,.14); text-shadow: 0 2px 6px rgba(0,0,0,.6); transition: color .2s; }
+  #wanted span.on { color: #ffffff; text-shadow: 0 0 10px rgba(255,255,255,.55), 0 2px 4px #000; }
+  #wanted.search span.on { animation: wblink .8s steps(2) infinite; }
+  #wanted.gain span.on { animation: wpulse .35s ease-in-out infinite alternate; }
+  @keyframes wblink { 50% { color: rgba(255,255,255,.25); text-shadow: none; } }
+  @keyframes wpulse { to { color: #ffd84a; transform: scale(1.15); } }
+  #busted { position: absolute; left: 0; right: 0; top: 40%; text-align: center; font-size: 96px; font-weight: 900; letter-spacing: 6px; color: #2b6cff; text-shadow: 0 4px 0 #000, 0 0 30px rgba(0,0,0,.8); opacity: 0; transition: opacity 1s; font-family: "Impact", "Arial Black", sans-serif; }
+  #hitflash { position: absolute; inset: 0; box-shadow: inset 0 0 160px 40px rgba(200,0,0,.55); opacity: 0; transition: opacity .35s; }
   #fps { position: absolute; left: 12px; top: 10px; font: 12px monospace; background: rgba(0,0,0,.5); padding: 3px 7px; border-radius: 4px; display: none; }
   #menu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at 30% 20%, rgba(255,45,111,.35), transparent 60%), radial-gradient(ellipse at 80% 90%, rgba(45,226,230,.28), transparent 55%), rgba(6,6,16,.82); backdrop-filter: blur(3px); z-index: 10; }
   .panel { width: min(980px, 94vw); max-height: 92vh; overflow: auto; padding: 28px 34px; border-radius: 18px; background: rgba(12,12,26,.78); box-shadow: 0 20px 60px rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.08); }
@@ -55,7 +64,10 @@
   <div id="prompt"></div>
   <div id="msg"></div>
   <div id="vehname"></div>
+  <div id="hitflash"></div>
+  <div id="wanted"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div>
   <div id="wasted">WASTED</div>
+  <div id="busted">BUSTED</div>
 </div>
 <div id="menu">
   <div class="panel">
@@ -82,6 +94,7 @@
           <tr><td class="k"><kbd>F</kbd></td><td>Exit (at speed = bail out) · پیاده شدن</td></tr>
           <tr><td class="k"><kbd>H</kbd> <kbd>V</kbd> <kbd>L</kbd></td><td>Horn · look back · lights · بوق / نگاه عقب / چراغ</td></tr>
           <tr><td class="k"><kbd>R</kbd></td><td>Flip car upright · برگرداندن ماشین</td></tr>
+          <tr><td class="k"><kbd>G</kbd></td><td>Siren (police car) · آژیر ماشین پلیس</td></tr>
         </table>
       </div>
       <div>
@@ -91,6 +104,13 @@
           <tr><td class="k"><kbd>M</kbd></td><td>Car radio on/off · رادیو</td></tr>
           <tr><td class="k"><kbd>F2</kbd> <kbd>P</kbd></td><td>Graphics quality · FPS counter</td></tr>
           <tr><td class="k"><kbd>Esc</kbd></td><td>Pause · توقف</td></tr>
+        </table>
+      </div>
+      <div>
+        <h3>Police · پلیس</h3>
+        <table>
+          <tr><td>Crimes seen by officers raise your wanted level (★ to ★★★★★). 1★: they try to arrest you · 2★+: they shoot · 3★+: they ram. Break line of sight and leave the search area until the stars stop blinking out.</td></tr>
+          <tr><td class="fa">جرم جلوی پلیس = ستاره. ۱ ستاره: دستگیری · ۲+: تیراندازی · ۳+: کوبیدن ماشین. از دید پلیس خارج شو و از محدوده جستجو دور شو تا ستاره‌ها پاک شوند.</td></tr>
         </table>
       </div>
       <div>

@@ -85,7 +85,7 @@ export class CameraRig {
     this.pivot.z = damp(this.pivot.z, _pivot.z, pk, dt);
 
     // ---------------------------------------------------- distance & fov
-    const footDist = (ch.speedScalar > 5 ? 4.4 : 3.7) * s;
+    const footDist = (ch.speedScalar > 6 ? 4.4 : 3.7) * s;
     const carDist = veh ? (veh.halfL * 1.25 + 2.6 + Math.min(speed, 40) * 0.035) : 6;
     const want = lerp(footDist, carDist, this.carW) * this.zoom;
     const fovT = lerp(60, 66 + Math.min(speed, 45) * 0.42, this.carW);

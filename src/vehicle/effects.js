@@ -281,6 +281,34 @@ export class Effects {
     }
   }
 
+  /** Pistol muzzle flash. */
+  muzzle(p, dir) {
+    _c.setRGB(1.0, 0.78, 0.4);
+    _v.set(dir.x * 2, dir.y * 2, dir.z * 2);
+    this.fireP.spawn(p, _v, 0.06, 0.32, 0.12, 1, _c, 0, 0);
+    _v2.copy(p).addScaledVector(dir, 0.12);
+    this.fireP.spawn(_v2, _v, 0.05, 0.22, 0.08, 0.9, _c, 0, 0);
+    for (let k = 0; k < 3; k++) {
+      _v.set(dir.x * 6 + (Math.random() - 0.5) * 3, dir.y * 6 + Math.random() * 2, dir.z * 6 + (Math.random() - 0.5) * 3);
+      this.sparks.spawn(p, _v, 0.08 + Math.random() * 0.08, 0.05, 0.02, 1, _c, 0.5, 0.3);
+    }
+    _c.setRGB(0.6, 0.6, 0.6);
+    _v.set(dir.x * 0.6, 0.3, dir.z * 0.6);
+    this.smoke.spawn(p, _v, 0.6, 0.08, 0.5, 0.18, _c, 1.5, 0);
+  }
+
+  /** Bullet striking a hard surface. */
+  bulletHit(p, n) {
+    for (let k = 0; k < 5; k++) {
+      _v.set(n.x * 3 + (Math.random() - 0.5) * 3, n.y * 3 + Math.random() * 2, n.z * 3 + (Math.random() - 0.5) * 3);
+      _c.setRGB(1, 0.8, 0.5);
+      this.sparks.spawn(p, _v, 0.1 + Math.random() * 0.15, 0.05, 0.02, 1, _c, 0.6, 1);
+    }
+    _c.setRGB(0.65, 0.62, 0.58);
+    _v.set(n.x * 0.8, n.y * 0.8 + 0.2, n.z * 0.8);
+    this.smoke.spawn(p, _v, 0.7, 0.06, 0.45, 0.3, _c, 2, 0);
+  }
+
   glass(p, amount = 1) {
     const n = Math.floor(18 + amount * 30);
     for (let k = 0; k < n; k++) {

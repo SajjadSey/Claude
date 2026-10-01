@@ -10,13 +10,14 @@ import { Character } from './char/character.js';
 import { PLAYER_APPEARANCE } from './char/rig.js';
 import { Vehicle } from './vehicle/vehicle.js';
 import { Effects } from './vehicle/effects.js';
-import { TrafficManager } from './ai/traffic.js';
+import { TrafficManager, DriverAI } from './ai/traffic.js';
 import { PedManager } from './ai/peds.js';
 import { CameraRig } from './game/camera.js';
 import { AudioSys } from './game/audio.js';
 import { HUD } from './game/hud.js';
 import { PlayerController } from './game/player.js';
 import { Explosions } from './game/explosions.js';
+import { PoliceManager } from './game/police.js';
 import { EnterSequence, ExitSequence } from './char/carSequences.js';
 import { randomAppearance } from './char/rig.js';
 
@@ -49,6 +50,7 @@ class Game {
     if (!QUALITY[this.settings.quality]) this.settings.quality = 'high';
     this.acc = 0;
     this.deathT = 0;
+    this.bustedT = 0;
     this.godMode = false;
   }
 
@@ -119,6 +121,7 @@ class Game {
     this.camRig.yaw = -0.7;
     this.hud = new HUD(this);
     this.explosions = new Explosions(this);
+    this.police = new PoliceManager(this);
     // warm-up: prefill traffic & peds around the player
     for (let i = 0; i < 7; i++) this.traffic.trySpawn(25, 150);
     for (let i = 0; i < 18; i++) this.peds.spawn(6, 80);
@@ -133,7 +136,7 @@ class Game {
     this.loop = this.loop.bind(this);
     if (!window.__NC_TEST) requestAnimationFrame(this.loop);
     window.__game = this;
-    if (window.__NC_TEST) window.__mods = { EnterSequence, ExitSequence, Character, Vehicle, randomAppearance, THREE };
+    if (window.__NC_TEST) window.__mods = { EnterSequence, ExitSequence, Character, Vehicle, randomAppearance, THREE, DriverAI };
   }
 
   /* ---------------------------------------------------------------- entities */
@@ -195,7 +198,14 @@ class Game {
             this.audio.metalHit(point, 0.8);
           }
         }
-        if (v.ai && b && b.type === 'car' && b.vehicle.driver === pc && impulse > 2500) {
+        if (b && b.type === 'car' && b.vehicle.driver === pc && impulse > 1500) {
+          v.lastPlayerHitT = this.time;
+          if (v.T.police && v.driver && v.driver.isCop && impulse > 2500 && this.police.ramT <= 0) {
+            this.police.ramT = 3;
+            this.police.crime('ramCop', v.curPos);
+          }
+        }
+        if (v.ai && !v.policeUnit && b && b.type === 'car' && b.vehicle.driver === pc && impulse > 2500) {
           v.ai.panic = 10;
           this.audio.horn(v.curPos, 1);
         }
@@ -236,19 +246,30 @@ class Game {
     } else {
       hit.pushVel.addScaledVector(dir, 3.2);
     }
-    if (hit.ai && hit.alive) {
+    if (hit.ai && hit.alive && !hit.isCop) {
       if (attacker.isPlayer && hit.ai.mode !== 'fight' && Math.random() < 0.35) hit.ai.fight(attacker);
       else if (hit.ai.mode !== 'fight') hit.ai.flee(attacker.pos, 9);
     }
-    if (attacker.isPlayer) this.peds.panic(hit.pos, 14, attacker.pos);
+    if (attacker.isPlayer) {
+      this.peds.panic(hit.pos, 14, attacker.pos);
+      this.police.crime(hit.isCop ? 'assaultCop' : 'assault', hit.pos);
+    }
   }
 
   onPedHit(ch, veh, speed) {
     this.peds.panic(ch.pos, 22, veh.curPos);
-    if (veh.driver === this.player.character) this.camRig.shake(Math.min(0.3, speed / 60));
+    if (veh.driver === this.player.character) {
+      this.camRig.shake(Math.min(0.3, speed / 60));
+      this.police.crime(ch.isCop ? 'assaultCop' : 'hitPed', ch.pos);
+    }
   }
 
   onJacked(occ, attacker, veh) {
+    if (attacker.isPlayer) {
+      veh.stolenReported = true;
+      this.police.crime(veh.T.police ? 'stealCop' : occ.isCop ? 'assaultCop' : 'jack', veh.curPos);
+    }
+    if (occ.isCop) { this.police.adoptJackedCop(occ, veh); this.peds.panic(veh.curPos, 12, attacker.pos); return; }
     this.peds.adopt(occ, Math.random() < 0.3 ? 'fight' : 'flee', Math.random() < 0.3 ? attacker : attacker.pos.clone());
     if (occ.ai && occ.ai.mode === 'flee') occ.ai.threat.copy(attacker.pos);
     this.peds.panic(veh.curPos, 12, attacker.pos);
@@ -260,6 +281,8 @@ class Game {
     if (!ch.isPlayer) return;
     this.player.lastVehicle = veh;
     veh.persistent = true;
+    if (veh.T.police && !veh.stolenReported) { veh.stolenReported = true; this.police.crime('stealCop', veh.curPos); }
+    veh.sirenOn = false;
     if (veh.ai) { veh.ai.disable(); veh.ai = null; }
     this.hud.vehicleName(`${veh.T.label} · ${veh.model.plate}`);
   }
@@ -274,13 +297,72 @@ class Game {
       return;
     }
     this.peds.panic(ch.pos, 25, ch.pos);
+    // killed by the player (directly, or from injuries the player caused moments ago)
+    if (this.time - ch.lastPlayerHitT < 12) this.police.crime(ch.isCop ? 'killCop' : 'killCiv', ch.pos);
     void cause;
   }
 
   onGotUp(ch) { void ch; }
 
   onShove(a, b) {
+    if (a.isPlayer) {
+      b.lastPlayerHitT = this.time;
+      this.police.crime(b.isCop ? 'assaultCop' : 'assault', b.pos);
+    }
     if (b.ai && b.alive && Math.random() < 0.4 && a.isPlayer) b.ai.fight(a);
+  }
+
+  onExploded(v) {
+    if (v === this.player.lastVehicle || this.time - (v.lastPlayerHitT ?? -99) < 15) this.police.crime('explosion', v.curPos);
+  }
+
+  /* ---------------------------------------------------------------- busted */
+  onBusted() {
+    if (this.bustedT || this.deathT) return;
+    this.bustedT = 0.001;
+    const pc = this.player.character;
+    pc.handsUp = true;
+    pc.input.mag = 0;
+    if (pc.state === 'vehicle' && pc.vehicle) {
+      const v = pc.vehicle;
+      v.input.throttle = 0; v.input.brake = 1; v.input.steer = 0;
+    }
+    this.hud.message('', 0.1);
+  }
+
+  updateBusted(dt) {
+    if (!this.bustedT) return;
+    this.bustedT += dt;
+    const pc = this.player.character;
+    pc.input.mag = 0;
+    const b = document.getElementById('busted');
+    if (this.bustedT > 1.0) {
+      b.style.opacity = 1;
+      this.renderer.domElement.style.filter = 'grayscale(0.85) contrast(1.1)';
+    }
+    if (this.bustedT > 5.0) {
+      this.bustedT = 0;
+      b.style.opacity = 0;
+      this.renderer.domElement.style.filter = '';
+      pc.handsUp = false;
+      if (pc.state === 'vehicle' && pc.vehicle) { pc.leaveVehicleInstant(); pc.state = 'foot'; pc.setCapsuleEnabled(true); }
+      if (pc.seq && pc.seq.abort) pc.seq.abort('busted');
+      if (pc.ragdoll.active) { pc.ragdoll.deactivate(); pc.alive = true; pc.state = 'foot'; pc.setCapsuleEnabled(true); }
+      pc.seq = null; pc.blend = null; pc.clearHands();
+      pc.state = 'foot';
+      pc.health = pc.maxHealth;
+      this.police.reset();
+      const sp = this.city.playerSpawn();
+      pc.teleport(_v.set(sp.x, sp.y + 0.05, sp.z), sp.yaw);
+      this.hud.message('Released from custody · از بازداشت آزاد شدی', 2.5);
+    }
+  }
+
+  /** Health slowly comes back after a few seconds without taking damage. */
+  regenPlayer(dt) {
+    const pc = this.player.character;
+    if (!pc.alive || this.deathT || pc.health >= pc.maxHealth) return;
+    if (this.time - pc.lastDamageT > 6) pc.health = Math.min(pc.maxHealth, pc.health + 3 * dt);
   }
 
   onTimeOfDay(p) {
@@ -335,6 +417,7 @@ class Game {
     this.player.update(dt);
     this.traffic.update(dt);
     this.peds.update(dt);
+    this.police.update(dt);
     this.parked.update(false);
 
     // fixed-step physics
@@ -375,6 +458,8 @@ class Game {
     this.effects.update(dt, this.camera, this.scene, this.renderer.domElement.height);
     this.hud.update(dt);
     this.updateDeath(dt);
+    this.updateBusted(dt);
+    this.regenPlayer(dt);
     if (!this.skipRender) this.renderer.render(this.scene, this.camera);
     input.endFrame();
   }
@@ -399,9 +484,9 @@ class Game {
           }
         } else w.lastSkidPos = null;
       }
-      if (v.health < 40 && v.health > 0 && Math.random() < dt * (v.health < 15 ? 25 : 10)) {
+      if (v.health < 30 && v.health > 0 && Math.random() < dt * (v.health < 12 ? 25 : 8)) {
         v.localToWorld(_v2.set(0, v.T.beltY + 0.05, v.halfL - 0.7), _v2);
-        this.effects.engineSmoke(_v2, v.health < 15);
+        this.effects.engineSmoke(_v2, v.health < 12);
       }
     }
   }
@@ -473,6 +558,7 @@ class Game {
       pc.blend = null;
       pc.clearHands();
       pc.setCapsuleEnabled(true);
+      this.police.reset();
       const sp = this.city.playerSpawn();
       pc.teleport(_v.set(sp.x, sp.y + 0.05, sp.z), sp.yaw);
       this.hud.message('Respawned · دوباره زنده شدی', 2);

@@ -15,6 +15,12 @@ export class HUD {
     this.fpsEl = $('fps');
     this.speedoWrap = $('speedo');
     this.wasted = $('wasted');
+    this.wantedEl = $('wanted');
+    this.stars = this.wantedEl ? [...this.wantedEl.children] : [];
+    this.hitEl = $('hitflash');
+    this.hitT = 0;
+    this.lastStars = -1;
+    this.lastWClass = '';
     this.vehName = $('vehname');
     this.msgT = 0;
     this.vehT = 0;
@@ -58,7 +64,27 @@ export class HUD {
     const veh = ch.state === 'vehicle' ? ch.vehicle : null;
     this.speedoWrap.style.opacity = veh ? 1 : 0;
     if (veh) this.drawSpeedo(veh);
+    this.updateWanted(dt);
     this.drawMinimap();
+  }
+
+  /** Red vignette when the player is shot. */
+  hit() {
+    this.hitT = 0.35;
+    if (this.hitEl) this.hitEl.style.opacity = 1;
+  }
+
+  updateWanted(dt) {
+    const g = this.game;
+    if (this.hitT > 0) { this.hitT -= dt; if (this.hitT <= 0 && this.hitEl) this.hitEl.style.opacity = 0; }
+    if (!g.police || !this.wantedEl) return;
+    const W = g.police.wanted;
+    if (W.stars !== this.lastStars) {
+      this.lastStars = W.stars;
+      this.stars.forEach((el, i) => el.classList.toggle('on', i < W.stars));
+    }
+    const cls = W.stars === 0 ? '' : W.flash > 0 ? 'gain' : !W.seen ? 'search' : '';
+    if (cls !== this.lastWClass) { this.lastWClass = cls; this.wantedEl.className = cls; }
   }
 
   drawMinimap() {
@@ -82,19 +108,32 @@ export class HUD {
     ctx.scale(k, k);
     const mx = (p.x - map.ox) * map.scale, mz = (p.z - map.oz) * map.scale;
     ctx.drawImage(map.canvas, -mx, -mz);
-    // vehicles
+    // police search area while out of sight
     const s = map.scale;
+    const WS = g.police ? g.police.wanted : null;
+    if (WS && WS.stars > 0 && !WS.seen) {
+      const cx = (WS.lastKnown.x - map.ox) * s - mx, cz = (WS.lastKnown.z - map.oz) * s - mz;
+      ctx.fillStyle = 'rgba(60,110,255,0.22)';
+      ctx.strokeStyle = 'rgba(120,160,255,0.75)';
+      ctx.lineWidth = 2 / k;
+      ctx.beginPath();
+      ctx.arc(cx, cz, WS.searchR * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    const blink = (g.time * 4) % 2 < 1;
     for (const v of g.vehicles) {
       const vx = (v.curPos.x - map.ox) * s - mx, vz = (v.curPos.z - map.oz) * s - mz;
-      ctx.fillStyle = v === g.player.lastVehicle ? '#4da3ff' : v.T.police ? '#3a5bff' : v.driver ? '#f5f5f5' : '#bbbbbb';
+      const chasing = v.policeUnit && !v.policeUnit.leaving && WS && WS.stars > 0;
+      ctx.fillStyle = v === g.player.lastVehicle ? '#4da3ff' : chasing ? (blink ? '#ff2a2a' : '#2a5bff') : v.T.police ? '#3a5bff' : v.driver ? '#f5f5f5' : '#bbbbbb';
       ctx.beginPath();
-      ctx.arc(vx, vz, 3.2 / k * 0.6, 0, Math.PI * 2);
+      ctx.arc(vx, vz, (chasing ? 4.6 : 3.2) / k * 0.6, 0, Math.PI * 2);
       ctx.fill();
     }
     for (const c of g.characters) {
       if (c === ch || c.state === 'vehicle') continue;
       const cx = (c.pos.x - map.ox) * s - mx, cz = (c.pos.z - map.oz) * s - mz;
-      ctx.fillStyle = c.state === 'dead' ? '#7a1010' : c.ai && c.ai.mode === 'fight' ? '#ff4040' : '#e8d080';
+      ctx.fillStyle = c.state === 'dead' ? '#7a1010' : c.isCop && WS && WS.stars > 0 ? (blink ? '#2a5bff' : '#ff2a2a') : c.isCop ? '#5577ff' : c.ai && c.ai.mode === 'fight' ? '#ff4040' : '#e8d080';
       ctx.fillRect(cx - 1.2 / k * 0.6, cz - 1.2 / k * 0.6, 2.4 / k * 0.6, 2.4 / k * 0.6);
     }
     ctx.restore();

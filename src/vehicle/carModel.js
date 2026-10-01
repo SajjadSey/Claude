@@ -47,7 +47,7 @@ export const CAR_TYPES = {
   },
 };
 CAR_TYPES.taxi = { ...CAR_TYPES.sedan, label: 'Taxi', taxi: true, colors: ['#f5c400'] };
-CAR_TYPES.police = { ...CAR_TYPES.sedan, label: 'Police', police: true, torque: 420, colors: ['#111418'] };
+CAR_TYPES.police = { ...CAR_TYPES.sedan, label: 'Police', police: true, torque: 500, grip: 1.2, rearGrip: 1.16, dragCA: 0.66, colors: ['#111418'] };
 
 /* ------------------------------------------------------------------------- materials */
 const sharedMats = {};

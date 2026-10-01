@@ -9,11 +9,12 @@ import RAPIER from '@dimforge/rapier3d-compat';
 const R_CharacterCollision = RAPIER.CharacterCollision;
 import { clamp, lerp, damp, approach, approachAngle, wrapAngle, smooth01, quatFromYaw, UP, makeRng } from '../core/util.js';
 
-export const SPEEDS = { walk: 1.45, run: 4.3, sprint: 6.9 };
+export const SPEEDS = { walk: 1.45, run: 5.1, sprint: 7.6 };
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
+const _v4 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _q3 = new THREE.Quaternion();
@@ -27,6 +28,30 @@ const _m = new THREE.Matrix4();
 const _coll = new R_CharacterCollision();
 
 let CHAR_ID = 1;
+
+// service pistol, built once and shared (hand-local: barrel along -Y, slide on the thumb side +Z)
+let GUN_PARTS = null;
+function makeGun() {
+  if (!GUN_PARTS) {
+    const metal = new THREE.MeshStandardMaterial({ color: 0x1b1c20, roughness: 0.45, metalness: 0.7 });
+    const grip = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.8, metalness: 0.1 });
+    GUN_PARTS = [
+      [new THREE.BoxGeometry(0.03, 0.19, 0.034).translate(0.012, -0.1, 0.056), metal],
+      [new THREE.BoxGeometry(0.027, 0.04, 0.105).translate(0.012, -0.055, -0.004), grip],
+      [new THREE.BoxGeometry(0.008, 0.035, 0.02).translate(0.012, -0.085, 0.026), metal],
+      [new THREE.CylinderGeometry(0.007, 0.007, 0.012, 8).rotateX(Math.PI / 2).rotateX(Math.PI / 2).translate(0.012, -0.198, 0.058), metal],
+    ];
+    for (const [g] of GUN_PARTS) g.userData.shared = true;
+  }
+  const gun = new THREE.Group();
+  for (const [g, m] of GUN_PARTS) {
+    const mesh = new THREE.Mesh(g, m);
+    mesh.castShadow = true;
+    gun.add(mesh);
+  }
+  gun.visible = false;
+  return gun;
+}
 
 export class Character {
   constructor(game, appearance, opts = {}) {
@@ -52,7 +77,14 @@ export class Character {
     this.lookYaw = 0;
     this.lookPitch = 0;
     this.crouch = 0;
-    this.input = { dir: new THREE.Vector3(), mag: 0, mode: 'run', jump: false };
+    this.input = { dir: new THREE.Vector3(), mag: 0, mode: 'run', jump: false, face: null };
+    this.armed = !!opts.armed;
+    this.aimTarget = null;
+    this.aimW = 0;
+    this.handsUp = false;
+    this.handsUpW = 0;
+    this.lastDamageT = -99;
+    this.lastPlayerHitT = -99;
     this.loco = new Locomotion(this);
     this.ragdoll = new Ragdoll(this.physics, this);
     this.pose = new Pose(this.rig.list.length);
@@ -68,6 +100,10 @@ export class Character {
     this.lastHitTime = -10;
     this.rng = makeRng(this.id * 31 + 7);
     this.createCapsule();
+    if (this.armed) {
+      this.gun = makeGun();
+      this.rig.bones.handR.add(this.gun);
+    }
     this.footstepTimer = 0;
     this.seatedCache = null;
     this.ai = null;
@@ -151,7 +187,7 @@ export class Character {
 
   /* --------------------------------------------------------------- on foot */
   updateFoot(dt) {
-    this.driveFoot(dt, this.input.dir, this.input.mag, this.input.mode, this.input.jump);
+    this.driveFoot(dt, this.input.dir, this.input.mag, this.input.mode, this.input.jump, this.input.face ?? null);
     this.input.jump = false;
   }
 
@@ -175,7 +211,7 @@ export class Character {
         const targetYaw = Math.atan2(dir.x, dir.z);
         const diff = wrapAngle(targetYaw - this.yaw);
         const turnRate = mode === 'sprint' ? 4.6 : mode === 'run' ? 7.0 : 8.0;
-        if (this.speedScalar > 4.0 && Math.abs(diff) > 2.3) {
+        if (this.speedScalar > 5.6 && Math.abs(diff) > 2.3) {
           // sharp reversal while sprinting: brake first
           speedTarget = 0;
           this.yaw = approachAngle(this.yaw, targetYaw, turnRate * 0.35 * dt);
@@ -188,7 +224,7 @@ export class Character {
         this.yaw = approachAngle(this.yaw, faceYaw, 5.0 * dt);
       }
       this.moveYaw = moveYaw;
-      const acc = speedTarget > this.speedScalar ? (mode === 'sprint' ? 6.5 : 8.5) : (this.speedScalar > 4.5 ? 9 : 12);
+      const acc = speedTarget > this.speedScalar ? (mode === 'sprint' ? 6.5 : 8.5) : (this.speedScalar > 5.5 ? 9 : 12);
       this.speedScalar = approach(this.speedScalar, speedTarget, acc * dt);
       this.vel.set(Math.sin(moveYaw) * this.speedScalar, 0, Math.cos(moveYaw) * this.speedScalar);
       if (jump) {
@@ -223,9 +259,10 @@ export class Character {
       const k = cc.computedCollision(i, _coll);
       if (!k || !k.normal1 || Math.abs(k.normal1.y) >= 0.6) continue;
       wall = true;
-      // sprinting into someone knocks them over
       const o = k.collider && P.ownerOf(k.collider);
-      if (o && o.type === 'char' && o.char.state === 'foot' && this.speedScalar > 5.0 && this.game.time - (this.lastShove || 0) > 0.6) {
+      if (o && o.type === 'prop') this.shoveProp(k.collider);
+      // sprinting into someone knocks them over
+      if (o && o.type === 'char' && o.char.state === 'foot' && this.speedScalar > 6.3 && this.game.time - (this.lastShove || 0) > 0.6) {
         this.lastShove = this.game.time;
         const other = o.char;
         _v2.copy(this.vel).multiplyScalar(0.75);
@@ -248,8 +285,8 @@ export class Character {
     this.pos.x += mx; this.pos.y += mv.y; this.pos.z += mz;
     // effective horizontal speed (walking into walls should not animate running)
     const actual = Math.hypot(mx, mz) / Math.max(dt, 1e-4);
-    if (wall && this.grounded && actual < this.speedScalar - 0.6) {
-      this.speedScalar = Math.max(actual + 0.3, 0);
+    if (wall && this.grounded && actual < this.speedScalar - 0.25) {
+      this.speedScalar = Math.max(actual + 0.1, 0);
       const my = this.moveYaw ?? this.yaw;
       this.vel.set(Math.sin(my) * this.speedScalar, 0, Math.cos(my) * this.speedScalar);
     }
@@ -278,6 +315,74 @@ export class Character {
     if (this.state !== 'foot' && this.state !== 'seq') return;
     this.loco.update(dt);
     this.updatePunch(dt);
+    this.updateAim(dt);
+  }
+
+  /** Pistol aim (right arm on the target, left hand supporting) and the hands-up surrender pose. */
+  updateAim(dt) {
+    const rig = this.rig;
+    this.aimW = approach(this.aimW, this.aimTarget && this.state === 'foot' ? 1 : 0, dt * 5);
+    if (this.gun) this.gun.visible = this.aimW > 0.05;
+    if (this.aimW > 0.001) {
+      if (this.aimTarget) (this.lastAim || (this.lastAim = new THREE.Vector3())).copy(this.aimTarget);
+      const t = this.lastAim;
+      const s = rig.scale;
+      const dx = t.x - this.pos.x, dz = t.z - this.pos.z, dy = t.y - (this.pos.y + 1.4 * s);
+      const yawErr = clamp(wrapAngle(Math.atan2(dx, dz) - this.yaw), -0.75, 0.75);
+      const pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -0.9, 0.9);
+      const w = this.aimW;
+      _e.set(-Math.PI / 2 - pitch, yawErr + 0.1, 0, 'YXZ');
+      _q.setFromEuler(_e);
+      rig.bones.upperArmR.quaternion.slerp(_q, w);
+      _e.set(-0.06, 0, 0, 'XYZ');
+      _q.setFromEuler(_e);
+      rig.bones.forearmR.quaternion.slerp(_q, w);
+      _q.setFromAxisAngle(_zAxis, 1.3);
+      rig.bones.fingersR.quaternion.slerp(_q, w);
+      // support hand cups the grip
+      _e.set(-Math.PI / 2 - pitch + 0.2, yawErr - 0.55, 0, 'YXZ');
+      _q.setFromEuler(_e);
+      rig.bones.upperArmL.quaternion.slerp(_q, w * 0.9);
+      _e.set(-0.95, 0, 0, 'XYZ');
+      _q.setFromEuler(_e);
+      rig.bones.forearmL.quaternion.slerp(_q, w * 0.9);
+      // shoulders square up to the target
+      _q.setFromAxisAngle(UP, yawErr * 0.35 * w);
+      rig.bones.chest.quaternion.multiply(_q);
+    }
+    this.handsUpW = approach(this.handsUpW, this.handsUp && (this.state === 'foot') ? 1 : 0, dt * 4);
+    if (this.handsUpW > 0.001) {
+      const w = this.handsUpW;
+      for (const [side, sx] of [['L', 1], ['R', -1]]) {
+        _e.set(-2.35, 0, sx * 0.5, 'XYZ');
+        _q.setFromEuler(_e);
+        rig.bones['upperArm' + side].quaternion.slerp(_q, w);
+        _e.set(-1.5, sx * 0.3, 0, 'XYZ');
+        _q.setFromEuler(_e);
+        rig.bones['forearm' + side].quaternion.slerp(_q, w);
+      }
+    }
+  }
+
+  /** World position of the pistol's muzzle. */
+  muzzleWorld(out) {
+    this.rig.root.updateMatrixWorld(true);
+    return this.gun ? this.gun.localToWorld(out.set(0.012, -0.205, 0.058)) : out.copy(this.pos).setY(this.pos.y + 1.4);
+  }
+
+  /** Walking into a loose prop transfers momentum (80 kg body, slightly bouncy contact). */
+  shoveProp(collider) {
+    const rb = collider.parent();
+    if (!rb || !rb.isDynamic()) return;
+    const t = rb.translation(), lv = rb.linvel();
+    let dx = t.x - this.pos.x, dz = t.z - this.pos.z;
+    const d = Math.hypot(dx, dz) || 1;
+    dx /= d; dz /= d;
+    const vInto = (this.vel.x - lv.x) * dx + (this.vel.z - lv.z) * dz;
+    if (vInto <= 0.05) return;
+    const m = rb.mass(), mu = (80 * m) / (80 + m);
+    const J = mu * vInto * 1.15;
+    rb.applyImpulseAtPoint({ x: dx * J, y: J * 0.08, z: dz * J }, { x: t.x, y: t.y + 0.1, z: t.z }, true);
   }
 
   respawnFallback() {
@@ -296,17 +401,25 @@ export class Character {
       const local = veh.worldToLocal(_v2, _v3);
       // predict a little ahead
       const vc = veh.velocityAt(_v2, _v);
-      const rel = Math.hypot(vc.x - this.vel.x, vc.z - this.vel.z);
-      const margin = this.capRadius + 0.05 + Math.min(0.6, rel * dt * 2);
+      const carSp = Math.hypot(vc.x, vc.z);
+      const margin = this.capRadius + 0.05 + Math.min(0.6, carSp * dt * 2);
       const hw = veh.halfW + margin, hl = veh.halfL + margin;
       if (Math.abs(local.x) > hw || Math.abs(local.z) > hl || local.y < -0.6 || local.y > veh.height + 0.4) continue;
-      if (rel > 3.0 && this.game.time - this.lastHitTime > 0.5) {
+      // face of the car we're touching (axis of least penetration) and the car's own speed
+      // through that face: only the car moving into us knocks us down, never us walking into it
+      const px = hw - Math.abs(local.x), pz = hl - Math.abs(local.z);
+      const sideFace = px < pz;
+      _v4.copy(vc).applyQuaternion(_q2.copy(veh.curQuat).invert());
+      const closing = sideFace ? _v4.x * Math.sign(local.x) : _v4.z * Math.sign(local.z);
+      const sweep = sideFace ? Math.abs(_v4.z) : Math.abs(_v4.x);
+      if ((closing > 3.2 || (sweep > 7 && closing > -0.5)) && this.game.time - this.lastHitTime > 0.5) {
         this.hitByCar(veh, vc, local);
         return;
       }
+      // a resting car is solid for the character controller already; only a moving one shoves
+      if (carSp < 0.3) continue;
       // push out along the axis of least penetration
-      const px = hw - Math.abs(local.x), pz = hl - Math.abs(local.z);
-      if (px < pz) _v2.set(Math.sign(local.x) * px, 0, 0); else _v2.set(0, 0, Math.sign(local.z) * pz);
+      if (sideFace) _v2.set(Math.sign(local.x) * px, 0, 0); else _v2.set(0, 0, Math.sign(local.z) * pz);
       _v2.applyQuaternion(veh.curQuat);
       _v2.y = 0;
       this.pos.add(_v2);
@@ -332,6 +445,8 @@ export class Character {
   damage(amount, cause, source) {
     if (!this.alive || amount <= 0) return;
     if (this.isPlayer && this.game.godMode) return;
+    this.lastDamageT = this.game.time;
+    if (source && (source.isPlayer || (source.driver && source.driver.isPlayer))) this.lastPlayerHitT = this.game.time;
     this.health -= amount;
     this.lastDamageCause = cause;
     if (this.health <= 0) {

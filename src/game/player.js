@@ -39,6 +39,7 @@ export class PlayerController {
 
   update(dt) {
     const g = this.game, inp = g.input, ch = this.character;
+    if (g.bustedT) { ch.input.mag = 0; g.hud.setPrompt(''); return; }
     const gp = inp.gamepad;
     const [ax, az] = this.axes();
     this.moveIntent = Math.min(1, Math.hypot(ax, az));

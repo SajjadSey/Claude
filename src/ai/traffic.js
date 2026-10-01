@@ -3,7 +3,7 @@ import { CITY, nodeCoord } from '../world/city.js';
 import { clamp, makeRng, lerp } from '../core/util.js';
 import { Vehicle } from '../vehicle/vehicle.js';
 import { Character } from '../char/character.js';
-import { randomAppearance } from '../char/rig.js';
+import { randomAppearance, copAppearance } from '../char/rig.js';
 
 const HR = CITY.ROAD_W / 2;
 const START_D = HR + 3.4;
@@ -73,17 +73,8 @@ export class DriverAI {
       const node = city.nodes[b];
       let options = node.links.filter((n) => n !== a);
       if (!options.length) options = [a];
-      // prefer straight slightly
       const d0 = edgeDir(city, a, b);
-      const weights = options.map((n) => {
-        const d1 = edgeDir(city, b, n);
-        const dot = d0.x * d1.x + d0.z * d1.z;
-        return dot > 0.5 ? 2.2 : 1;
-      });
-      let tot = weights.reduce((s, w) => s + w, 0);
-      let r = this.rng() * tot;
-      let c = options[0];
-      for (let i = 0; i < options.length; i++) { r -= weights[i]; if (r <= 0) { c = options[i]; break; } }
+      const c = this.chooseNext(a, b, options);
       // turn curve through the intersection
       const p0 = lanePoint(city, a, b, d0.len - STOP_D, new THREE.Vector3());
       const p2 = lanePoint(city, b, c, START_D, new THREE.Vector3());
@@ -117,6 +108,21 @@ export class DriverAI {
       this.points.splice(0, this.idx - 10);
       this.idx = 10;
     }
+  }
+
+  /** Next node after edge a->b: random, preferring to go straight. */
+  chooseNext(a, b, options) {
+    const city = this.game.city;
+    const d0 = edgeDir(city, a, b);
+    const weights = options.map((n) => {
+      const d1 = edgeDir(city, b, n);
+      const dot = d0.x * d1.x + d0.z * d1.z;
+      return dot > 0.5 ? 2.2 : 1;
+    });
+    const tot = weights.reduce((s, w) => s + w, 0);
+    let r = this.rng() * tot;
+    for (let i = 0; i < options.length; i++) { r -= weights[i]; if (r <= 0) return options[i]; }
+    return options[0];
   }
 
   onThreat(ch) {
@@ -163,7 +169,15 @@ export class DriverAI {
       tgt = b;
       if (acc >= look) break;
     }
-    const local = v.worldToLocal(_v2.set(tgt.x, pos.y, tgt.z), _v2);
+    _v2.set(tgt.x, pos.y, tgt.z);
+    if (this.laneShift) {
+      // overtaking: aim into the next lane over (to the left of the path direction)
+      const nx = pts[Math.min(this.idx + 1, pts.length - 1)], px = pts[Math.max(this.idx - 1, 0)];
+      const dx = nx.x - px.x, dz = nx.z - px.z, dl = Math.hypot(dx, dz) || 1;
+      _v2.x += (dz / dl) * this.laneShift;
+      _v2.z += (-dx / dl) * this.laneShift;
+    }
+    const local = v.worldToLocal(_v2, _v2);
     const ld = Math.max(1, Math.hypot(local.x, local.z));
     const alpha = Math.atan2(local.x, local.z);
     const wb = v.T.wheelbase;
@@ -179,8 +193,8 @@ export class DriverAI {
       const a = pts[i], b = pts[i + 1];
       dist += Math.hypot(b.x - a.x, b.z - a.z);
       if (a.turn !== 0) {
-        const vt = a.turn > 0 ? 6.8 : 5.8;
-        target = Math.min(target, Math.sqrt(vt * vt + 2 * 3.0 * Math.max(0, dist - 4)));
+        const vt = (a.turn > 0 ? 6.8 : 5.8) * (this.turnK || 1);
+        target = Math.min(target, Math.sqrt(vt * vt + 2 * (this.decel || 3.0) * Math.max(0, dist - 4)));
       }
       if (a.stop && this.panic <= 0) {
         const st = city.lightState(a.stop.node, a.stop.axis, this.game.time);
@@ -194,7 +208,7 @@ export class DriverAI {
       if (dist > 60) break;
     }
     // obstacles ahead
-    const obs = this.obstacleAhead();
+    const obs = this.obstacleAhead(this.passing || null);
     if (obs < 60) target = Math.min(target, Math.max(0, (obs - 3.2) * 0.85));
     if (this.stopForThreat > 0) {
       this.stopForThreat -= dt;
@@ -214,7 +228,7 @@ export class DriverAI {
       steer = -steer;
     } else {
       const err = target - speed;
-      if (err > 0) throttle = clamp(err * 0.3, 0, this.panic > 0 ? 1 : 0.75);
+      if (err > 0) throttle = clamp(err * 0.3, 0, this.panic > 0 ? 1 : 0.75) * clamp(1.15 - Math.abs(steer) * 0.7, 0.35, 1);
       else brake = clamp(-err * 0.25, 0, 1);
       // below walking pace never press the brake (it would engage reverse); the parking hold keeps the car still
       if (speed < 1.0) brake = 0;
@@ -226,7 +240,7 @@ export class DriverAI {
   }
 
   /** Distance to the nearest obstacle in our lane ahead (big number if none). */
-  obstacleAhead() {
+  obstacleAhead(ignore = null) {
     const v = this.veh;
     let best = 999;
     const check = (p, halfLen, w) => {
@@ -238,7 +252,7 @@ export class DriverAI {
       if (d < best) best = d;
     };
     for (const o of this.game.vehicles) {
-      if (o === v || o.removed) continue;
+      if (o === v || o === ignore || o.removed) continue;
       const dx = o.curPos.x - v.curPos.x, dz = o.curPos.z - v.curPos.z;
       if (dx * dx + dz * dz > 2500) continue;
       check(o.curPos, Math.min(o.halfL, 1.4), 0.4);
@@ -255,7 +269,7 @@ export class DriverAI {
 }
 
 /* ======================================================================= manager */
-const TYPES = [['sedan', 0.34], ['taxi', 0.14], ['suv', 0.2], ['sport', 0.1], ['muscle', 0.12], ['police', 0.04]];
+const TYPES = [['sedan', 0.33], ['taxi', 0.14], ['suv', 0.19], ['sport', 0.1], ['muscle', 0.12], ['police', 0.06]];
 function pickType(r) {
   let x = r();
   for (const [t, w] of TYPES) { x -= w; if (x <= 0) return t; }
@@ -326,7 +340,9 @@ export class TrafficManager {
       const yaw = Math.atan2(d.x, d.z);
       const sp = 8;
       const veh = g.addVehicle(type, null, p.setY(0.08), yaw, { vel: new THREE.Vector3(d.x * sp, 0, d.z * sp) });
-      const driver = new Character(g, randomAppearance(r.int(1, 1e9)));
+      const police = type === 'police';
+      const driver = new Character(g, police ? copAppearance(r.int(1, 1e9)) : randomAppearance(r.int(1, 1e9)), { armed: police });
+      driver.isCop = police;
       g.addCharacter(driver);
       driver.teleport(p, yaw);
       driver.enterVehicleInstant(veh, 1);
@@ -343,4 +359,4 @@ export class TrafficManager {
   }
 }
 
-export { lanePoint, lerp };
+export { lanePoint, edgeDir, lerp, START_D, STOP_D };

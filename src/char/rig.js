@@ -42,6 +42,19 @@ export function randomAppearance(seed) {
   };
 }
 
+/** Police officer: navy uniform shirt, dark trousers, peaked cap. */
+export function copAppearance(seed) {
+  const a = randomAppearance(seed);
+  return {
+    ...a,
+    shirt: '#1f3466', shirtAccent: '#c9a227', shirtKind: 'plain', sleeve: 'short',
+    pants: '#151821', pantsKind: 'long', shoes: '#0d0d0f',
+    hat: !a.female, hatColor: '#141c35', glasses: a.glasses && seed % 3 === 0,
+    hairStyle: a.female ? 'ponytail' : (a.hairStyle === 'curly' ? 'short' : a.hairStyle),
+    cop: true,
+  };
+}
+
 export const PLAYER_APPEARANCE = {
   female: false, skin: '#d6a07a', hair: '#1e1611', hairStyle: 'short', shirt: '#17a2b8', shirtAccent: '#ff5e8a',
   shirtKind: 'hawaiian', sleeve: 'short', pants: '#2e3b55', pantsKind: 'long', shoes: '#f4f4f4', glasses: false,

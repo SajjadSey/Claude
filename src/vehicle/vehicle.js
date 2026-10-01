@@ -119,6 +119,8 @@ export class Vehicle {
     this.horn = false;
     this.lastImpact = 0;
     this.damageCooldown = 0;
+    this.crashT = 0;
+    this.crashPeak = 0;
     this.prevVel = new THREE.Vector3();
     this.accelLocal = new THREE.Vector3();
     this.prevPos = new THREE.Vector3(pos.x, pos.y, pos.z);
@@ -195,12 +197,17 @@ export class Vehicle {
     this.effThrottle = throttle;
     this.effBrake = brake;
 
+    // handbrake "drift mode": full slide behaviour while pulled, fading out after release so a
+    // handbrake-started drift can still be held on the throttle; without it the car grips more
+    this.hbDrift = inp.handbrake ? 1 : Math.max(0, (this.hbDrift || 0) - h * 0.7);
+    const dm = this.hbDrift;
+
     // ------------------------------------------------ steering
     const v = Math.abs(vLongCar);
     const maxSteer = T.steerMax / (1 + v * v / 520);
     let target = clamp(inp.steer, -1, 1) * maxSteer;
     // counter-steer assist when the body slides (player-friendly drifting)
-    if (this.driver && this.driver.isPlayer && v > 4) {
+    if (this.driver && (this.driver.isPlayer || this.driver.isCop) && v > 4) {
       const slip = Math.atan2(vLatCar, Math.max(1, Math.abs(vLongCar)));
       target = clamp(target + slip * 0.55 * Math.sign(vLongCar || 1), -T.steerMax, T.steerMax);
     }
@@ -370,7 +377,8 @@ export class Vehicle {
       const alpha = Math.atan2(Math.abs(vLat), vRef);
       const peak = 0.13;
       let g;
-      if (alpha < peak) { const x = alpha / peak; g = x * (2 - x); } else g = 1 - 0.24 * smoothstep(peak, peak * 5, alpha);
+      const fall = w.front ? 0.24 : lerp(0.14, 0.24, dm);
+      if (alpha < peak) { const x = alpha / peak; g = x * (2 - x); } else g = 1 - fall * smoothstep(peak, peak * 5, alpha);
       if (locked) g *= 0.5;
       const FyCancel = Math.abs(vLat) * (T.mass / 4) / h * 0.5;
       let Fy = -Math.sign(vLat) * Math.min(maxF * g, FyCancel);
@@ -384,8 +392,8 @@ export class Vehicle {
       if (tot > maxF) {
         // the longitudinal demand eats into lateral grip
         const fxr = Math.abs(Fx) / maxF;
-        const latAvail = maxF * Math.sqrt(Math.max(0, 1 - fxr * fxr)) * (wheelspin > 0 ? 0.8 : 1);
-        Fy = Math.sign(Fy) * Math.min(Math.abs(Fy), Math.max(latAvail, maxF * 0.45));
+        const latAvail = maxF * Math.sqrt(Math.max(0, 1 - fxr * fxr)) * (wheelspin > 0 ? lerp(0.9, 0.8, dm) : 1);
+        Fy = Math.sign(Fy) * Math.min(Math.abs(Fy), Math.max(latAvail, maxF * (w.front ? 0.45 : lerp(0.55, 0.45, dm))));
       }
       // apply
       _F.copy(_up).multiplyScalar(Fz).addScaledVector(_wf, Fx).addScaledVector(_ws, Fy);
@@ -412,17 +420,17 @@ export class Vehicle {
     this.grounded = grounded;
 
     // ------------------------------------------------ drift stabilizer (keeps slides controllable)
-    if (grounded >= 3 && this.driver && this.driver.isPlayer && Math.abs(vLongCar) > 3) {
+    if (grounded >= 3 && this.driver && (this.driver.isPlayer || this.driver.isCop) && Math.abs(vLongCar) > 3) {
       const slip = Math.atan2(vLatCar, Math.abs(vLongCar));
       const av = body.angvel();
       const yawRate = av.x * _up.x + av.y * _up.y + av.z * _up.z;
-      const limit = inp.handbrake ? 0.95 : 0.6;
+      const limit = lerp(0.47, 0.95, dm);
       const excess = Math.abs(slip) - limit;
       let corr = 0;
       // yaw rate that increases |slip| beyond the limit is damped
       if (excess > 0 && Math.sign(yawRate) === -Math.sign(slip) * Math.sign(vLongCar)) corr = -yawRate * clamp(excess * 4, 0, 1) * 0.6;
       // mild general yaw damping while sliding without handbrake
-      if (!inp.handbrake && Math.abs(slip) > 0.15) corr += -yawRate * 0.05;
+      if (!inp.handbrake && Math.abs(slip) > 0.12) corr += -yawRate * lerp(0.12, 0.05, dm);
       if (corr !== 0) {
         const I = this.T.mass / 12 * (this.T.width ** 2 + this.T.length ** 2);
         const tq = corr * I * 0.9;
@@ -438,7 +446,7 @@ export class Vehicle {
       const down = 0.4 * sp * sp * (T.label === 'Sport' ? 1.6 : 0.6);
       body.applyImpulse({ x: -_up.x * down * h, y: -_up.y * down * h, z: -_up.z * down * h }, true);
     }
-    if (grounded === 0 && this.driver && this.driver.isPlayer) {
+    if (grounded === 0 && this.driver && (this.driver.isPlayer || this.driver.isCop)) {
       const pitch = (inp.throttle - inp.brake) * 0.0;
       const tq = _v.copy(_right).multiplyScalar(-pitch * 2200).addScaledVector(_fwd, -inp.steer * 1400);
       body.applyTorqueImpulse({ x: tq.x * h, y: tq.y * h, z: tq.z * h }, true);
@@ -463,6 +471,7 @@ export class Vehicle {
     this.accelLocal.lerp(acc, 0.3);
     this.updateDoors(dt);
     this.damageCooldown = Math.max(0, this.damageCooldown - dt);
+    this.crashT = Math.max(0, (this.crashT || 0) - dt);
     // put idle, driverless cars to sleep so they cost nothing
     if (!this.driver && !this.body.isSleeping()) {
       const av = this.body.angvel();
@@ -617,12 +626,20 @@ export class Vehicle {
 
   /* ---------------------------------------------------------------- damage */
   applyDamage(worldPoint, impulse, otherOwner) {
+    // health: a single crash fires many contact events (several colliders, several substeps);
+    // it costs its peak severity once instead of the sum of every event
+    const sev = clamp((impulse - 1800) / 15000, 0, 1);
+    if (this.crashT <= 0) this.crashPeak = 0;
+    if (sev > this.crashPeak) {
+      this.health = Math.max(0, this.health - (sev - this.crashPeak) * 26);
+      this.crashPeak = sev;
+    }
+    if (sev > 0) this.crashT = 0.35;
     if (this.damageCooldown > 0 && impulse < 9000) return;
     this.damageCooldown = 0.08;
     const local = this.worldToLocal(worldPoint, _v);
     const amount = clamp((impulse - 1000) / 15000, 0, 1);
     if (amount <= 0) return;
-    this.health = Math.max(0, this.health - amount * 34);
     const depth = 0.06 + amount * 0.3;
     const radius = 0.5 + amount * 0.75;
     // inward direction: towards the car's centre line, mostly horizontal

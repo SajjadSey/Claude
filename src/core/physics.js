@@ -34,7 +34,9 @@ export class Physics {
     this.cc.enableSnapToGround(0.35);
     this.cc.setMaxSlopeClimbAngle(50 * Math.PI / 180);
     this.cc.setMinSlopeSlideAngle(60 * Math.PI / 180);
-    this.cc.setApplyImpulsesToDynamicBodies(true);
+    // impulses on props are applied by the character itself (momentum-based); the built-in
+    // solver treats the kinematic capsule as infinitely heavy and can launch a parked car
+    this.cc.setApplyImpulsesToDynamicBodies(false);
     this.cc.setCharacterMass(80);
     this.cc.setSlideEnabled(true);
     this.ray = new RAPIER.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });

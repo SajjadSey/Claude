@@ -20,17 +20,18 @@ export class Explosions {
       // cars left upside down eventually catch fire too
       if (v.isUpsideDown() && v.speed < 1.5) {
         v.upsideT = (v.upsideT || 0) + dt;
-        if (v.upsideT > 5 && v.health > 0) v.health = 0;
+        // after a while on its roof the engine starts to cook: smoke first, fire later
+        if (v.upsideT > 8 && v.health > 0) v.health = Math.max(0, v.health - 12 * dt);
       } else v.upsideT = 0;
       if (v.health <= 0) {
         if (v.burnT === undefined) {
-          v.burnT = 7;
+          v.burnT = 10;
           v.engineOn = false;
           g.hud?.message && v.driver === g.player.character && g.hud.message('🔥 Get out! · سریع پیاده شو!', 2.5);
         }
         v.burnT -= dt;
         v.localToWorld(_v.set(0, v.T.beltY + 0.1, v.halfL - 0.7), _v);
-        const k = clamp(1.2 - v.burnT / 7, 0.4, 1.3);
+        const k = clamp(1.2 - v.burnT / 10, 0.4, 1.3);
         if (Math.random() < dt * 40) g.effects.fire(_v, k);
         if (Math.random() < dt * 15) g.effects.engineSmoke(_v, true);
         if (v.burnT <= 0) this.explode(v);
@@ -45,6 +46,7 @@ export class Explosions {
   explode(v) {
     const g = this.game;
     v.exploded = true;
+    g.onExploded?.(v);
     const p = v.curPos.clone();
     p.y += 0.8;
     g.effects.explosion(p);

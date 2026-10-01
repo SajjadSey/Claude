@@ -218,6 +218,68 @@ export class AudioSys {
     this.tone(pos, { freq: f0, type: 'sawtooth', dur: 0.35, gain: 0.07, slide: 1.25, ref: 5, max: 50 });
     setTimeout(() => this.tone(pos, { freq: f0 * 1.2, type: 'sawtooth', dur: 0.3, gain: 0.06, slide: 0.8, ref: 5, max: 50 }), 220);
   }
+  gunshot(pos) {
+    if (!this.ready) return;
+    this.noiseBurst(pos, { dur: 0.05, type: 'highpass', freq: 2500, gain: 0.9, ref: 14, max: 320 });
+    this.noiseBurst(pos, { dur: 0.32, type: 'lowpass', freq: 2200, gain: 1.1, ref: 14, max: 320, sweep: 0.25 });
+    this.tone(pos, { freq: 150, dur: 0.18, gain: 0.8, slide: 0.35, ref: 14, max: 320 });
+  }
+  bulletImpact(pos, soft = false) {
+    if (!this.ready || !this.throttleKey('bimp', 0.03)) return;
+    if (soft) this.noiseBurst(pos, { dur: 0.06, type: 'lowpass', freq: 900, gain: 0.5, ref: 4, max: 50 });
+    else {
+      this.noiseBurst(pos, { dur: 0.05, type: 'bandpass', freq: 3500, q: 2, gain: 0.35, ref: 5, max: 70 });
+      this.tone(pos, { freq: 1800 + Math.random() * 1200, type: 'triangle', dur: 0.12, gain: 0.05, slide: 0.6, ref: 5, max: 70 });
+    }
+  }
+  whiz(pos) {
+    if (!this.ready || !this.throttleKey('whiz', 0.08)) return;
+    this.noiseBurst(pos, { dur: 0.14, type: 'bandpass', freq: 4200, q: 4, gain: 0.25, sweep: 0.4, ref: 3, max: 15 });
+  }
+
+  /* ------------------------------------------------------------- police siren (nearest car) */
+  makeSiren() {
+    const ctx = this.ctx;
+    const s = { phase: 0, mode: 0, modeT: 0 };
+    s.out = ctx.createGain();
+    s.out.gain.value = 0;
+    s.pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    if (s.pan) s.out.connect(s.pan).connect(this.sfx); else s.out.connect(this.sfx);
+    s.f = ctx.createBiquadFilter();
+    s.f.type = 'lowpass';
+    s.f.frequency.value = 2600;
+    s.o1 = ctx.createOscillator(); s.o1.type = 'square';
+    s.o2 = ctx.createOscillator(); s.o2.type = 'sawtooth';
+    const g2 = ctx.createGain(); g2.gain.value = 0.5;
+    s.o1.connect(s.f); s.o2.connect(g2).connect(s.f);
+    s.f.connect(s.out);
+    s.o1.start(); s.o2.start();
+    return s;
+  }
+  updateSiren(dt, game) {
+    let best = null, bd = 1e9;
+    for (const v of game.vehicles) {
+      if (!v.sirenOn || v.removed) continue;
+      const d = v.curPos.distanceToSquared(this.listener);
+      if (d < bd) { bd = d; best = v; }
+    }
+    if (!best && !this.siren) return;
+    if (!this.siren) this.siren = this.makeSiren();
+    const s = this.siren, t = this.ctx.currentTime;
+    const sp = best ? this.spatial(best.curPos, 22, 300) : null;
+    s.out.gain.setTargetAtTime(sp ? 0.075 * sp.g : 0, t, 0.08);
+    if (s.pan && sp) s.pan.pan.setTargetAtTime(sp.pan, t, 0.05);
+    if (!sp) return;
+    // alternate a slow wail and a fast yelp
+    s.modeT -= dt;
+    if (s.modeT <= 0) { s.mode = 1 - s.mode; s.modeT = s.mode ? 3.2 : 6.5; }
+    s.phase += dt / (s.mode ? 0.32 : 3.4);
+    const k = 0.5 - 0.5 * Math.cos(s.phase * Math.PI * 2);
+    const f = 640 + 700 * k;
+    s.o1.frequency.setTargetAtTime(f, t, 0.02);
+    s.o2.frequency.setTargetAtTime(f * 1.005, t, 0.02);
+  }
+
   horn(pos, k = 1) {
     if (!this.ready || this.muted) return;
     const sp = this.spatial(pos, 10, 200);
@@ -366,6 +428,7 @@ export class AudioSys {
         for (let k = 0; k < 3; k++) setTimeout(() => this.tone(p, { freq: 1500 + Math.random() * 300, type: 'triangle', dur: 0.18, gain: 0.05, slide: 0.65, ref: 20, max: 140 }), k * 220);
       }
     }
+    this.updateSiren(dt, game);
     // radio
     const radioTarget = veh && this.radioOn && ch.state === 'vehicle' ? 0.22 : 0;
     this.musicBus.gain.setTargetAtTime(radioTarget, t, 0.5);

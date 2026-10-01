@@ -36,6 +36,7 @@ On slower machines the game lowers its graphics quality automatically. You can a
 | `Space` | Handbrake (drift) · ترمز دستی (دریفت) |
 | `F` | Get out (at speed you jump out and tumble) · پیاده شدن |
 | `H` `V` `L` `R` | Horn · look back · headlights · flip car upright |
+| `G` | Siren (in a police car) · آژیر ماشین پلیس |
 | `N` / `M` | Time of day (golden hour / noon / night) · radio |
 | `F2` / `P` | Graphics quality · FPS counter |
 
@@ -54,20 +55,28 @@ If the driver's door is blocked by a wall or another car, the character uses the
 At speed, pressing F makes you bail out and tumble across the road.
 
 **Car physics**
-- Raycast suspension with springs, separate bump and rebound damping, bump stops and anti‑roll bars. Bodies visibly roll, pitch and bounce.
-- Tyre model based on slip angle, with a peak and then fall‑off, so cars slide. A friction circle means throttle reduces sideways grip (power oversteer) and the handbrake locks the rear wheels.
+- Suspension with springs, separate bump and rebound damping, bump stops and anti‑roll bars. Each wheel is tested as a tyre-shaped volume (not a single ray), so tyres roll up curbs and over obstacles where the rubber actually touches. Bodies visibly roll, pitch and bounce.
+- Tyre model based on slip angle, with a peak and then fall‑off. A friction circle means throttle reduces sideways grip (power oversteer). Cars grip well on throttle alone; pull the handbrake and they switch to full drift mode, which fades out over a second or so after you let go, so a handbrake slide can be held on the throttle.
 - Engine torque curve, automatic 6‑speed gearbox, rev limiter, clutch slip at launch, drag and downforce.
 - Grip depends on the surface: asphalt, concrete, grass, sand.
-- Crash damage: the body panels dent where they were hit, glass cracks, lights break, doors can pop open, and a badly damaged engine smokes and loses power.
-- Wrecked cars (and cars left on their roof) catch fire and explode. The blast throws nearby cars, props and people.
+- Crash damage: the body panels dent where they were hit, glass cracks, lights break, doors can pop open. Damage depends on how hard a crash is, not on how many parts touched, so it takes several heavy crashes before an engine starts to smoke (below 30%), loses power and finally burns.
+- Wrecked cars catch fire and explode about 10 s later; a car left on its roof first smokes, then burns. The blast throws nearby cars, props and people.
 - An open door swings on its own as the car accelerates and brakes, and slams shut in the airflow.
 - Effects: tyre smoke, skid marks, sparks, glass shards.
 
 **Characters**
 - A procedurally modelled, skinned human with smooth joints, a face (eyes, brows, nose, ears, mouth), hair styles and clothing. Pedestrians get random body types, skin tones, outfits, hairstyles, glasses and caps.
-- Locomotion is fully procedural and uses inverse kinematics (IK) to plant each foot on the ground, so feet don't slide. Heel strike and toe‑off roll, pelvis bob/sway/twist, counter‑swinging arms, leaning into speed and turns, small steps when turning on the spot, and stepping up and down curbs.
+- Locomotion is fully procedural and uses inverse kinematics (IK) to plant each foot on the ground, so feet don't slide. Cadence and stance/flight timing follow measured human gait data (walk ~116 steps/min, run ~178, sprint ~196). Both legs are phase-locked so they can never fall out of step. When running, the heel kicks up behind, the knee drives through, and there is a real flight phase. Also: heel strike and toe‑off roll, pelvis bob/sway/twist, counter‑swinging arms, leaning into speed and turns, small steps when turning on the spot, and stepping up and down curbs.
+- Walking or running into a parked car just stops you (you never get knocked down by a car that isn't moving). Loose props get shoved with realistic momentum.
 - Full‑body ragdolls with anatomical joint limits, for people hit by cars, punched, thrown out of cars, caught in explosions or falling. Ragdolls collide with each other, with cars and with the world. Afterwards they get up with a real get‑up sequence, from either lying on their back or face down.
 - Sprinting into someone knocks them over. Pedestrians you punch either run away or fight back.
+
+**Police and wanted level ★★★★★**
+- Crimes seen by a police officer give you a wanted level: assault, car theft, running people over. Serious crimes are always reported: murder, attacking or killing an officer, stealing a police car, explosions.
+- ★: officers try to arrest you; stand still near one and you're **BUSTED**. ★★ and up: they shoot (only a few at a time, with limited accuracy). ★★★ and up: patrol cars ram you.
+- The response is capped: at most one car per star (5 at ★★★★★), and never more than 2–4 officers shooting at once. Your health slowly regenerates when you avoid being hit.
+- Police drive with sirens, ignore red lights, overtake traffic through the opposite lane, follow your exact route around corners, and do handbrake turns when they're facing the wrong way. When you stop, they get out and chase on foot. When you drive off, they jump back into their car.
+- **Losing them:** break line of sight. The stars blink, and a blue search zone appears on the minimap. Get out of that zone and stay unseen until the stars disappear. Police cars and officers flash red/blue on the minimap.
 
 **World**
 - A city of about 0.5 km² with art‑deco, hotel, stucco, brick and glass towers, neon signs, palm trees, parks with fountains, parking lots, a stunt park with ramps, a beach, and the ocean.

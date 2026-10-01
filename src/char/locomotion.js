@@ -14,6 +14,19 @@ const _e = new THREE.Euler();
 const _xAxis = new THREE.Vector3(1, 0, 0);
 const _qLook = new THREE.Quaternion();
 
+// gait cycle time (two steps) by speed: measured human cadence, ~116 steps/min walking,
+// ~178 jogging/running, ~196 sprinting
+const CYCLE = [[0, 1.16], [1.0, 1.12], [1.45, 1.03], [2.2, 0.86], [3.0, 0.76], [4.3, 0.70], [5.1, 0.674], [7.6, 0.612], [10, 0.58]];
+function cycleTime(sp) {
+  for (let i = 1; i < CYCLE.length; i++) {
+    if (sp <= CYCLE[i][0]) {
+      const [a, ta] = CYCLE[i - 1], [b, tb] = CYCLE[i];
+      return lerp(ta, tb, (sp - a) / (b - a));
+    }
+  }
+  return CYCLE[CYCLE.length - 1][1];
+}
+
 function mkFoot(side) {
   return {
     side, // +1 = left (+X local), -1 = right
@@ -21,8 +34,8 @@ function mkFoot(side) {
     from: new THREE.Vector3(),
     target: new THREE.Vector3(),
     yaw: 0, yawFrom: 0,
-    swing: false, u: 0, dur: 0.4, lift: 0.1, liftAmt: 0,
-    pitch: 0, idleStep: false, lastFp: 0, landT: 1, groundT: 0,
+    swing: false, u: 0, dur: 0.4, lift: 0.1, liftAmt: 0, relFrom: new THREE.Vector3(),
+    pitch: 0, pitch0: 0, idleStep: false, lastFp: 0, fp: 0, locked: false, landT: 1, groundT: 0,
   };
 }
 
@@ -88,9 +101,14 @@ export class Locomotion {
     f.u = 0;
     f.dur = Math.max(0.12, dur);
     f.from.copy(f.pos);
+    f.relFrom.set(f.pos.x - this.c.pos.x, 0, f.pos.z - this.c.pos.z);
     f.yawFrom = f.yaw;
     f.idleStep = idle;
     f.lift = lift * this.rig.scale;
+    f.pitch0 = f.pitch;
+    f.locked = false;
+    f.u0 = 0;
+    f.bodySpace = false;
   }
 
   update(dt) {
@@ -109,8 +127,9 @@ export class Locomotion {
     const legScale = Math.sqrt(L.leg / 0.87);
     const runT = invLerp(2.0, 4.2, sp);
     this.runT = runT;
-    const Tc = lerp(1.08, 0.46, invLerp(1.0, 6.5, sp)) * legScale;
-    const sw = lerp(0.4, 0.68, runT);
+    const Tc = cycleTime(sp) * legScale;
+    // swing share of the cycle: 40% walking, ~70% running (flight phases), ~79% sprinting
+    const sw = lerp(0.4, 0.7, runT) + 0.09 * invLerp(5.0, 7.6, sp);
     const swingDur = sw * Tc;
     const stanceDur = (1 - sw) * Tc;
     this.stepLen = Math.max(0.3, sp * Tc * 0.5);
@@ -146,10 +165,15 @@ export class Locomotion {
       this.phase = (this.phase + dt / Tc) % 1;
       for (const f of this.feet) {
         const fp = (this.phase + (f.side > 0 ? 0 : 0.5)) % 1;
-        if (fp < f.lastFp && !f.swing) {
-          this.startSwing(f, swingDur, false, lerp(0.11, 0.3, runT) + clamp((sp - 5) * 0.04, 0, 0.1));
+        if (fp < f.lastFp) {
+          // each foot lifts exactly once per cycle and its swing progress is read from the phase,
+          // so the two legs always stay half a cycle apart (no limping after a rescue step)
+          if (!f.swing || f.idleStep || !f.locked) this.startSwing(f, swingDur, false, lerp(0.12, 0.32, runT) + clamp((sp - 5.5) * 0.04, 0, 0.08));
+          f.locked = true;
         }
         f.lastFp = fp;
+        f.fp = fp;
+        if (f.swing && f.locked) { f.u = Math.min(1, fp / sw); f.dur = swingDur; }
       }
     }
     this.moving = moving;
@@ -178,30 +202,46 @@ export class Locomotion {
         continue;
       }
       if (f.swing) {
-        f.u += dt / f.dur;
+        if (!(f.locked && moving)) f.u += dt / f.dur;
         const u = Math.min(f.u, 1);
         if (f.idleStep || !moving) {
+          // stopping mid-stride: carry on from where the foot is now instead of the lift-off spot
+          if (f.bodySpace) { f.bodySpace = false; f.from.copy(f.pos); f.u0 = u; }
           this.idealPos(f, f.target);
+          const e = smooth01(clamp((u - f.u0) / Math.max(1e-3, 1 - f.u0), 0, 1));
+          f.pos.x = lerp(f.from.x, f.target.x, e);
+          f.pos.z = lerp(f.from.z, f.target.z, e);
+          f.pos.y = lerp(f.from.y, f.target.y, e);
         } else {
+          // The swing is a pendulum relative to the hips: it starts where the foot left the ground
+          // (behind the body) and ends at the touchdown spot ahead of it. Interpolating in body
+          // space keeps the foot from shooting forward early and hovering in front of the body.
           const remaining = (1 - u) * f.dur;
-          const lead = remaining + stanceDur * 0.42;
+          const land = stanceDur * lerp(0.46, 0.37, runT);
           const w = lerp(0.105, 0.07, runT) * s;
-          f.target.set(c.pos.x + vx * lead + leftX * w * f.side, c.pos.y, c.pos.z + vz * lead + leftZ * w * f.side);
+          const rx = vx * land + leftX * w * f.side, rz = vz * land + leftZ * w * f.side;
+          f.target.set(c.pos.x + vx * remaining + rx, c.pos.y, c.pos.z + vz * remaining + rz);
           f.target.y = c.groundAt(f.target.x, f.target.z, c.pos.y);
+          // running: the heel kicks up behind first, then the knee drives through
+          const d0 = lerp(0, 0.14, runT), d1 = lerp(0.05, 0.1, runT);
+          const e = smooth01(clamp((u - d0) / (1 - d0 - d1), 0, 1));
+          f.pos.x = c.pos.x + lerp(f.relFrom.x, rx, e);
+          f.pos.z = c.pos.z + lerp(f.relFrom.z, rz, e);
+          f.pos.y = lerp(f.from.y, f.target.y, smooth01(u));
+          f.bodySpace = true;
         }
-        const e = smooth01(u);
-        f.pos.x = lerp(f.from.x, f.target.x, e);
-        f.pos.z = lerp(f.from.z, f.target.z, e);
-        f.pos.y = lerp(f.from.y, f.target.y, e);
-        const uk = Math.pow(Math.min(1, u * 1.05), f.idleStep ? 1 : lerp(1, 0.7, runT));
+        // foot height peaks early in the swing (heel lifts behind, then the foot passes low)
+        const uk = Math.pow(Math.min(1, u * 1.05), f.idleStep ? 1 : lerp(0.62, 0.7, runT));
         const liftShape = Math.sin(Math.PI * uk);
         f.liftAmt = f.lift * Math.pow(Math.max(0, liftShape), 0.8) + Math.max(0, (f.target.y - f.from.y)) * 0.0;
         f.yaw = f.yawFrom + wrapAngle(c.yaw - f.yawFrom) * smooth01(Math.min(1, u * 1.3));
         const mw = Math.min(1, sp / 1.5);
-        f.pitch = f.idleStep ? 0 : (0.7 * (1 - u) * (1 - u) - 0.32 * u * u) * mw;
+        // toe-down after push-off, toe-up for the heel strike (runners land flatter)
+        f.pitch = f.idleStep ? 0 : (Math.max(0.5, f.pitch0) * (1 - u) * (1 - u) - lerp(0.32, 0.1, runT) * u * u) * mw;
         if (f.u >= 1) {
           f.swing = false;
-          f.pos.copy(f.target);
+          f.locked = false;
+          f.target.copy(f.pos); // (equal at u=1, except right after a mid-stride stop)
           f.liftAmt = 0;
           f.landT = 0;
           if (c.onFootstep) c.onFootstep(f, lerp(0.5, 1.0, runT));
@@ -211,13 +251,19 @@ export class Locomotion {
         // emergency step if the planted foot is out of reach
         _hipW.set(c.pos.x + leftX * L.hipX * f.side, 0, c.pos.z + leftZ * L.hipX * f.side);
         const hd = Math.hypot(f.pos.x - _hipW.x, f.pos.z - _hipW.z);
-        if (hd > maxReach * 0.72 || Math.abs(f.pos.y - c.pos.y) > 0.5) {
-          this.startSwing(f, 0.22, !moving, 0.12);
+        // (while moving the gait phase lifts the foot itself; only a foot left far behind - after
+        // a stumble or a sharp turn - needs a rescue step, and it would otherwise desync the legs)
+        if (hd > maxReach * (moving ? 0.97 : 0.72) || Math.abs(f.pos.y - c.pos.y) > 0.5) {
+          this.startSwing(f, moving ? Math.min(swingDur, 0.3) : 0.22, !moving, moving ? 0.18 : 0.12);
         }
         // heel-off: when the foot trails behind the body the heel rolls up over the toes
         if (moving) {
           const rel = ((f.pos.x - c.pos.x) * fwdX + (f.pos.z - c.pos.z) * fwdZ) / (this.stepLen + 1e-3);
-          const target = clamp((-rel - 0.25) * lerp(1.0, 1.6, runT), 0, lerp(0.55, 0.85, runT));
+          let target = clamp((-rel - 0.25) * lerp(1.0, 1.6, runT), 0, lerp(0.55, 0.85, runT));
+          // by stance progress: walkers roll off the heel late, runners are up on the forefoot early
+          const st = f.fp >= sw ? (f.fp - sw) / (1 - sw) : 0;
+          const s0 = lerp(0.5, 0.25, runT);
+          target = Math.max(target, lerp(0.6, 0.95, runT) * smooth01((st - s0) / (1 - s0)));
           f.pitch = damp(f.pitch, target, 25, dt);
         } else {
           f.pitch = damp(f.pitch, 0, 14, dt);
@@ -339,9 +385,9 @@ export class Locomotion {
 
     // ---------------------------------------------------- arms (FK)
     const runArm = runT;
-    const amp = lerp(0.36, 0.85, runArm) * moveW;
-    const swingL = clamp(-amp * fr, -1.2, 1.0);
-    const swingR = clamp(-amp * fl, -1.2, 1.0);
+    const amp = lerp(0.36, 0.76, runArm) * moveW;
+    const swingL = clamp(-amp * fr, -1.0, 0.85);
+    const swingR = clamp(-amp * fl, -1.0, 0.85);
     const elbowBase = lerp(0.22, 1.45, runArm);
     const idleSway = Math.sin(this.time * 1.3) * 0.02 * (1 - moveW);
     const armOut = lerp(0.1, 0.16, runArm) + air * 0.5;
