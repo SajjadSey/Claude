@@ -19,6 +19,9 @@ const _n = new THREE.Vector3();
 const _F = new THREE.Vector3();
 const _P = new THREE.Vector3();
 const _m4 = new THREE.Matrix4();
+const _qw = new THREE.Quaternion();
+const _qAxle = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
+const _P2 = new THREE.Vector3();
 
 let VEH_ID = 1;
 
@@ -234,25 +237,56 @@ export class Vehicle {
     const driveForceTotal = engineTorque * ratio * T.finalDrive * 0.86 / T.wheelR * (this.reverse ? -1 : 1);
     const engineBrake = throttle < 0.05 ? clamp(this.rpm / T.redline, 0, 1) * 900 * (this.reverse ? 0 : 1) : 0;
 
-    // ------------------------------------------------ suspension raycasts
+    // ------------------------------------------------ suspension: wheel-shaped casts
+    // A rounded cylinder (the tyre) is swept down from the fully compressed position, so the
+    // rubber itself meets curbs, ramps and bodies instead of a single ray under the hub.
     const P = this.physics;
     let grounded = 0;
     const filter = groups(G.ALL, G.STATIC | G.CAR | G.PROP | G.RAGDOLL);
+    if (!this.wheelShape) {
+      const r = T.wheelR, hh = T.wheelW * 0.36, b = 0.05;
+      this.wheelShape = new R.RoundCylinder(hh - b, r - b, b);
+    }
+    // cylinder axis (local Y) -> car X
+    _qw.copy(_q).multiply(_qAxle);
+    const W = P.world;
     for (const w of this.wheels) {
       _mount.set(w.x, w.mountY, w.z).applyQuaternion(_q).add(pos);
       _v.copy(_up).negate();
-      const maxLen = this.suspRest + w.r;
-      const hit = P.raycast(_mount, _v, maxLen, filter, body);
       w.lastComp = w.comp;
-      if (hit) {
+      let found = false;
+      const sh = W.castShape({ x: _mount.x, y: _mount.y, z: _mount.z }, { x: _qw.x, y: _qw.y, z: _qw.z, w: _qw.w },
+        { x: _v.x, y: _v.y, z: _v.z }, this.wheelShape, 0.0, this.suspRest, false, undefined, filter, undefined, body);
+      if (sh && sh.time_of_impact > 1e-4) {
+        const t = sh.time_of_impact;
+        // witness1/normal1 lie on the hit collider and are already in world space
+        _P2.set(sh.witness1.x, sh.witness1.y, sh.witness1.z);
+        _n.set(sh.normal1.x, sh.normal1.y, sh.normal1.z);
+        w.comp = clamp(this.suspRest - t, 0, this.suspRest);
+        w.contact.copy(_P2);
+        // steep contacts (curb faces) lift the wheel but the tyre plane stays aligned with the body
+        if (_n.dot(_up) < 0.5) _n.copy(_up);
+        w.normal.copy(_n);
+        found = true;
+        w.hitCollider = sh.collider;
+      } else {
+        // fallback ray (also covers casts that start already touching something)
+        const maxLen = this.suspRest + w.r;
+        const hit = P.raycast(_mount, _v, maxLen, filter, body);
+        if (hit) {
+          w.comp = clamp(maxLen - hit.dist, 0, this.suspRest);
+          w.contact.copy(hit.point);
+          w.normal.copy(hit.normal);
+          w.hitCollider = hit.collider;
+          found = true;
+        }
+      }
+      if (found) {
         w.grounded = true;
         grounded++;
-        w.comp = clamp(maxLen - hit.dist, 0, this.suspRest);
-        w.contact.copy(hit.point);
-        w.normal.copy(hit.normal);
-        const owner = P.ownerOf(hit.collider);
+        const owner = P.ownerOf(w.hitCollider);
         w.surface = owner ? owner.surface || 'asphalt' : 'asphalt';
-        const pb = hit.collider.parent();
+        const pb = w.hitCollider.parent();
         w.hitBody = pb && pb.isDynamic() ? pb : null;
         w.hitOwner = owner;
       } else {
@@ -354,7 +388,7 @@ export class Vehicle {
         Fy = Math.sign(Fy) * Math.min(Math.abs(Fy), Math.max(latAvail, maxF * 0.45));
       }
       // apply
-      _F.copy(_n).multiplyScalar(Fz).addScaledVector(_wf, Fx).addScaledVector(_ws, Fy);
+      _F.copy(_up).multiplyScalar(Fz).addScaledVector(_wf, Fx).addScaledVector(_ws, Fy);
       // application point raised toward the roll center to tame body roll
       _v.copy(w.contact).addScaledVector(_up, T.rollCenter);
       const imp = { x: _F.x * h, y: _F.y * h, z: _F.z * h };
