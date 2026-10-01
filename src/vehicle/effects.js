@@ -231,7 +231,7 @@ export class Effects {
     _v.set(vel.x * 0.25 + (Math.random() - 0.5) * 1.2, 0.4 + Math.random() * 0.8, vel.z * 0.25 + (Math.random() - 0.5) * 1.2);
     _v2.set(p.x + (Math.random() - 0.5) * 0.2, p.y + 0.15, p.z + (Math.random() - 0.5) * 0.2);
     const dusty = surface === 'sand' || surface === 'grass' || surface === 'dirt';
-    this.smoke.spawn(_v2, _v, 1.6 + Math.random() * 1.6 * intensity, 0.6, 3.2 + intensity * 2.5, (dusty ? 0.5 : 0.32) * Math.min(1, intensity + 0.3), col, 1.2, 0);
+    this.smoke.spawn(_v2, _v, 1.4 + Math.random() * 1.4 * intensity, 0.6, 2.8 + intensity * 2.2, (dusty ? 0.42 : 0.22) * Math.min(1, intensity + 0.3), col, 1.2, 0);
   }
 
   exhaust(p, vel) {

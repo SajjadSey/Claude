@@ -564,13 +564,13 @@ export class Vehicle {
   /* ---------------------------------------------------------------- damage */
   applyDamage(worldPoint, impulse, otherOwner) {
     if (this.damageCooldown > 0 && impulse < 9000) return;
-    this.damageCooldown = 0.12;
+    this.damageCooldown = 0.08;
     const local = this.worldToLocal(worldPoint, _v);
-    const amount = clamp((impulse - 1200) / 22000, 0, 1);
+    const amount = clamp((impulse - 1000) / 15000, 0, 1);
     if (amount <= 0) return;
-    this.health = Math.max(0, this.health - amount * 22);
-    const depth = 0.05 + amount * 0.26;
-    const radius = 0.45 + amount * 0.7;
+    this.health = Math.max(0, this.health - amount * 34);
+    const depth = 0.06 + amount * 0.3;
+    const radius = 0.5 + amount * 0.75;
     // inward direction: towards the car's centre line, mostly horizontal
     _n.set(-local.x * 0.6, -Math.max(0, local.y - 0.9) * 0.4, -local.z).normalize();
     if (Math.abs(local.z) < this.halfL - 0.6) _n.set(-Math.sign(local.x), 0, 0); // side impact

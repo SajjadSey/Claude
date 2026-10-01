@@ -380,7 +380,7 @@ class Game {
       const vel = v.linvel(_v);
       for (const w of v.wheels) {
         if (w.grounded && w.skidding > 0.12) {
-          if (Math.random() < w.skidding * dt * 45) this.effects.tireSmoke(w.contact, vel, w.skidding, w.surface);
+          if (Math.random() < w.skidding * dt * 32) this.effects.tireSmoke(w.contact, vel, w.skidding, w.surface);
           if (w.surface === 'asphalt' || w.surface === 'concrete') {
             if (w.lastSkidPos) {
               if (w.lastSkidPos.distanceToSquared(w.contact) > 0.04) {
@@ -403,7 +403,7 @@ class Game {
     if (!this.headlights) {
       this.headlights = new THREE.Group();
       for (const s of [1, -1]) {
-        const l = new THREE.SpotLight(0xfff1d6, 60, 70, 0.5, 0.45, 1.6);
+        const l = new THREE.SpotLight(0xfff1d6, 4000, 90, 0.52, 0.5, 2);
         l.position.set(s * 0.6, 0.7, 2.3);
         l.target.position.set(s * 0.6, 0.0, 14);
         l.castShadow = false;
@@ -412,7 +412,7 @@ class Game {
       this.scene.add(this.headlights);
       this.nightPool = [];
       for (let i = 0; i < 8; i++) {
-        const pl = new THREE.PointLight(0xffc880, 25, 22, 1.8);
+        const pl = new THREE.PointLight(0xffc880, 400, 32, 2);
         this.scene.add(pl);
         this.nightPool.push(pl);
       }
@@ -439,7 +439,7 @@ class Game {
         pl.visible = true;
         pl.position.set(L.x, L.y - (L.lamp ? 0.4 : 0), L.z);
         pl.color.set(L.color);
-        pl.intensity = L.lamp ? 30 : 14;
+        pl.intensity = L.lamp ? 650 : 160;
       }
     }
   }
