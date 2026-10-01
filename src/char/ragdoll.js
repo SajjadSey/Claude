@@ -54,7 +54,7 @@ export class Ragdoll {
     rig.root.updateMatrixWorld(true);
     this.parts = [];
     this.byBone = {};
-    const filter = G.STATIC | G.CAR | G.PROP | G.DEBRIS;
+    const filter = G.STATIC | G.CAR | G.PROP | G.DEBRIS | G.RAGDOLL;
     for (const d of DEFS) {
       const bone = rig.bones[d.bone];
       bone.getWorldPosition(_p);
@@ -80,6 +80,7 @@ export class Ragdoll {
         .setRestitution(0.05)
         .setCollisionGroups(groups(G.RAGDOLL, filter))
         .setActiveEvents(R.ActiveEvents.CONTACT_FORCE_EVENTS)
+        .setActiveHooks(R.ActiveHooks.FILTER_CONTACT_PAIRS)
         .setContactForceEventThreshold(1500);
       const col = world.createCollider(cd, body);
       P.setOwner(col, { type: 'ragdoll', char: this.char, part: d.bone, surface: 'flesh' });
@@ -88,6 +89,7 @@ export class Ragdoll {
           .setTranslation(0, -0.455 * s, 0.05 * s)
           .setMass(1.0 * s)
           .setFriction(0.9)
+          .setActiveHooks(R.ActiveHooks.FILTER_CONTACT_PAIRS)
           .setCollisionGroups(groups(G.RAGDOLL, filter));
         const c2 = world.createCollider(fc, body);
         P.setOwner(c2, { type: 'ragdoll', char: this.char, part: d.bone, surface: 'flesh' });

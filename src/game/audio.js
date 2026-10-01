@@ -185,6 +185,13 @@ export class AudioSys {
     }
     this.noiseBurst(pos, { dur: 0.3, type: 'highpass', freq: 3500, gain: 0.4, ref: 8 });
   }
+  explosion(pos) {
+    if (!this.ready) return;
+    this.tone(pos, { freq: 60, dur: 1.4, gain: 1.4, slide: 0.3, ref: 25, max: 400 });
+    this.noiseBurst(pos, { dur: 1.6, type: 'lowpass', freq: 900, gain: 1.6, ref: 25, max: 400, sweep: 0.2 });
+    this.noiseBurst(pos, { dur: 0.5, type: 'bandpass', freq: 2500, q: 0.8, gain: 0.6, ref: 25, max: 300 });
+    setTimeout(() => this.glass(pos), 120);
+  }
   metalHit(pos, k = 1) {
     this.tone(pos, { freq: 320, type: 'triangle', dur: 0.8, gain: 0.25 * k, slide: 0.97, ref: 10 });
     this.tone(pos, { freq: 811, type: 'sine', dur: 0.6, gain: 0.12 * k, slide: 0.99, ref: 10 });

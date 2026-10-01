@@ -221,7 +221,21 @@ export class Character {
     const nc = cc.numComputedCollisions();
     for (let i = 0; i < nc; i++) {
       const k = cc.computedCollision(i, _coll);
-      if (k && k.normal1 && Math.abs(k.normal1.y) < 0.6) { wall = true; break; }
+      if (!k || !k.normal1 || Math.abs(k.normal1.y) >= 0.6) continue;
+      wall = true;
+      // sprinting into someone knocks them over
+      const o = k.collider && P.ownerOf(k.collider);
+      if (o && o.type === 'char' && o.char.state === 'foot' && this.speedScalar > 5.0 && this.game.time - (this.lastShove || 0) > 0.6) {
+        this.lastShove = this.game.time;
+        const other = o.char;
+        _v2.copy(this.vel).multiplyScalar(0.75);
+        _v2.y = 1.4;
+        other.damage(6, 'shove', this);
+        other.toRagdoll(_v2, { spin: 1 });
+        this.speedScalar *= 0.45;
+        this.game.audio?.bodyHit(other.pos, 5);
+        this.game.onShove?.(this, other);
+      }
     }
     const wantH = Math.hypot(desired.x, desired.z);
     let mx = mv.x, mz = mv.z;

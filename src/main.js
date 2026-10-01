@@ -16,6 +16,7 @@ import { CameraRig } from './game/camera.js';
 import { AudioSys } from './game/audio.js';
 import { HUD } from './game/hud.js';
 import { PlayerController } from './game/player.js';
+import { Explosions } from './game/explosions.js';
 import { EnterSequence, ExitSequence } from './char/carSequences.js';
 import { randomAppearance } from './char/rig.js';
 
@@ -117,6 +118,7 @@ class Game {
     this.camRig = new CameraRig(this.camera, this);
     this.camRig.yaw = -0.7;
     this.hud = new HUD(this);
+    this.explosions = new Explosions(this);
     // warm-up: prefill traffic & peds around the player
     for (let i = 0; i < 7; i++) this.traffic.trySpawn(25, 150);
     for (let i = 0; i < 18; i++) this.peds.spawn(6, 80);
@@ -277,6 +279,10 @@ class Game {
 
   onGotUp(ch) { void ch; }
 
+  onShove(a, b) {
+    if (b.ai && b.alive && Math.random() < 0.4 && a.isPlayer) b.ai.fight(a);
+  }
+
   onTimeOfDay(p) {
     this.night = p.night;
     const city = this.city;
@@ -357,6 +363,7 @@ class Game {
       c.lodAcc = 0;
     }
     this.vehicleFX(dt);
+    this.explosions.update(dt);
     this.props.update();
     this.city.update(this.time, dt);
     const pc = this.player.character;
@@ -392,7 +399,7 @@ class Game {
           }
         } else w.lastSkidPos = null;
       }
-      if (v.health < 40 && Math.random() < dt * (v.health < 15 ? 25 : 10)) {
+      if (v.health < 40 && v.health > 0 && Math.random() < dt * (v.health < 15 ? 25 : 10)) {
         v.localToWorld(_v2.set(0, v.T.beltY + 0.05, v.halfL - 0.7), _v2);
         this.effects.engineSmoke(_v2, v.health < 15);
       }

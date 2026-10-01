@@ -42,6 +42,16 @@ export class Physics {
     this.impactListeners = [];
     this.prePhysics = [];
     this.pairCooldown = new Map();
+    // ragdolls collide with each other but not with their own limbs
+    const owners = this.owners;
+    this.hooks = {
+      filterContactPair(c1, c2) {
+        const a = owners.get(c1), b = owners.get(c2);
+        if (a && b && a.type === 'ragdoll' && b.type === 'ragdoll' && a.char === b.char) return null;
+        return RAPIER.SolverFlags.COMPUTE_IMPULSE;
+      },
+      filterIntersectionPair() { return true; },
+    };
   }
 
   setOwner(collider, owner) {
@@ -110,7 +120,7 @@ export class Physics {
 
   step() {
     for (const fn of this.prePhysics) fn(this.h);
-    this.world.step(this.eq);
+    this.world.step(this.eq, this.hooks);
     this.time += this.h;
     const world = this.world;
     this.eq.drainContactForceEvents((ev) => {

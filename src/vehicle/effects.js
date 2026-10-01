@@ -222,8 +222,35 @@ export class Effects {
     this.smoke = new ParticlePool(scene, 2200, smokeTexture(), THREE.NormalBlending, 0);
     this.sparks = new ParticlePool(scene, 900, sparkTexture(), THREE.AdditiveBlending, -9.8);
     this.debris = new ParticlePool(scene, 700, sparkTexture(), THREE.NormalBlending, -9.8);
+    this.fireP = new ParticlePool(scene, 900, smokeTexture(), THREE.AdditiveBlending, 0);
     this.skids = new SkidMarks(scene);
     this.emitters = [];
+  }
+
+  /** Flames licking out of an engine bay. */
+  fire(p, k = 1) {
+    _v.set((Math.random() - 0.5) * 0.6, 1.4 + Math.random() * 1.6, (Math.random() - 0.5) * 0.6);
+    _v2.set(p.x + (Math.random() - 0.5) * 0.7 * k, p.y, p.z + (Math.random() - 0.5) * 0.7 * k);
+    _c.setRGB(1.0, 0.45 + Math.random() * 0.25, 0.12);
+    this.fireP.spawn(_v2, _v, 0.45 + Math.random() * 0.4, 0.5 * k, 1.4 * k, 0.9, _c, 0.8, 0);
+  }
+
+  /** Fireball, sparks, debris and smoke. */
+  explosion(p) {
+    for (let k = 0; k < 90; k++) {
+      const a = Math.random() * Math.PI * 2, b = Math.random() * Math.PI * 0.5;
+      const sp = 3 + Math.random() * 7;
+      _v.set(Math.cos(a) * Math.cos(b) * sp, Math.sin(b) * sp + 2, Math.sin(a) * Math.cos(b) * sp);
+      _c.setRGB(1.0, 0.35 + Math.random() * 0.4, 0.08);
+      this.fireP.spawn(p, _v, 0.5 + Math.random() * 0.6, 1.5, 4.5, 1, _c, 2.2, 0);
+    }
+    for (let k = 0; k < 40; k++) {
+      _v.set((Math.random() - 0.5) * 6, 2 + Math.random() * 5, (Math.random() - 0.5) * 6);
+      _c.setRGB(0.12, 0.11, 0.1);
+      this.smoke.spawn(p, _v, 3 + Math.random() * 3, 2, 8, 0.55, _c, 0.7, 0);
+    }
+    this.sparkBurst(p, _v.set(0, 1, 0), 60, 12);
+    this.debrisBurst(p, _c.setRGB(0.15, 0.15, 0.15), 30);
   }
 
   tireSmoke(p, vel, intensity, surface) {
@@ -302,6 +329,7 @@ export class Effects {
       }
     }
     this.smoke.update(dt, camera, scene, height);
+    this.fireP.update(dt, camera, scene, height);
     this.sparks.update(dt, camera, scene, height);
     this.debris.update(dt, camera, scene, height);
     this.skids.flush();
