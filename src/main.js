@@ -19,6 +19,7 @@ import { PlayerController } from './game/player.js';
 import { Explosions } from './game/explosions.js';
 import { PoliceManager } from './game/police.js';
 import { Weather } from './world/weather.js';
+import { Ballistics, WEAPONS } from './game/weapons.js';
 import { EnterSequence, ExitSequence } from './char/carSequences.js';
 import { randomAppearance } from './char/rig.js';
 
@@ -124,6 +125,7 @@ class Game {
     this.hud = new HUD(this);
     this.explosions = new Explosions(this);
     this.police = new PoliceManager(this);
+    this.ballistics = new Ballistics(this);
     // warm-up: prefill traffic & peds around the player
     for (let i = 0; i < 7; i++) this.traffic.trySpawn(25, 150);
     for (let i = 0; i < 18; i++) this.peds.spawn(6, 80);
@@ -450,6 +452,7 @@ class Game {
     }
     this.vehicleFX(dt);
     this.explosions.update(dt);
+    this.ballistics.update(dt);
     this.props.update();
     this.city.update(this.time, dt);
     const pc = this.player.character;

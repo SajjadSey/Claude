@@ -1,4 +1,5 @@
 import { clamp } from '../core/util.js';
+import { WEAPONS } from './weapons.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,6 +19,13 @@ export class HUD {
     this.wantedEl = $('wanted');
     this.stars = this.wantedEl ? [...this.wantedEl.children] : [];
     this.hitEl = $('hitflash');
+    this.cross = $('crosshair');
+    this.crossBars = this.cross ? [...this.cross.querySelectorAll('i')] : [];
+    this.hm = this.cross ? this.cross.querySelector('.hm') : null;
+    this.hmT = 0;
+    this.weaponEl = $('weapon');
+    this.weaponT = 0;
+    this.lastGap = -1;
     this.hitT = 0;
     this.lastStars = -1;
     this.lastWClass = '';
@@ -65,7 +73,42 @@ export class HUD {
     this.speedoWrap.style.opacity = veh ? 1 : 0;
     if (veh) this.drawSpeedo(veh);
     this.updateWanted(dt);
+    this.updateCrosshair(dt);
+    if (this.weaponT > 0 && this.weaponT < 1e8) { this.weaponT -= dt; if (this.weaponT <= 0) this.weaponEl.style.opacity = 0; }
     this.drawMinimap();
+  }
+
+  setWeapon(W) {
+    if (!this.weaponEl) return;
+    this.weaponEl.innerHTML = W.hold ? `${W.name}<b>∞</b><small>${W.fa}</small>` : `${W.name}<small>${W.fa}</small>`;
+    this.weaponEl.style.opacity = 1;
+    this.weaponT = W.hold ? 1e9 : 2.5;
+  }
+
+  hitMarker(kill) {
+    if (!this.hm) return;
+    this.hm.className = kill ? 'hm kill' : 'hm';
+    this.hm.style.opacity = 1;
+    this.hmT = kill ? 0.5 : 0.18;
+  }
+
+  updateCrosshair(dt) {
+    const pl = this.game.player;
+    if (!this.cross || !pl) return;
+    const ch = pl.character;
+    const show = (pl.aiming || pl.hipT > 0 || pl.driveAim) && ch.alive && !this.game.bustedT;
+    this.cross.style.opacity = show ? 1 : 0;
+    if (this.hmT > 0) { this.hmT -= dt; if (this.hmT <= 0) this.hm.style.opacity = 0; }
+    if (!show) return;
+    const W = WEAPONS[pl.weapon];
+    const sp = W && W.hold ? ((pl.aiming || pl.driveAim) ? W.aimSpread : W.spread) * (1 + pl.bloom) : 0.01;
+    const gap = Math.round(4 + sp * 420);
+    if (gap !== this.lastGap) {
+      this.lastGap = gap;
+      const [t, b, l, r] = this.crossBars;
+      t.style.top = `${-gap - 9}px`; b.style.top = `${gap}px`; l.style.left = `${-gap - 9}px`; r.style.left = `${gap}px`;
+    }
+    this.cross.classList.toggle('on', !!pl.aimOnTarget);
   }
 
   /** Red vignette when the player is shot. */

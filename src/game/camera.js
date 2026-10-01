@@ -24,6 +24,7 @@ export class CameraRig {
     this.curDist = 4;
     this.time = 0;
     this.lookBack = false;
+    this.aimW = 0;
   }
 
   shake(amount) { this.trauma = Math.min(1, this.trauma + amount); }
@@ -36,10 +37,15 @@ export class CameraRig {
     let mdx = input.mouseDX, mdy = input.mouseDY;
     if (input.gamepad) { mdx += input.gamepad.rx * 900 * dt; mdy += input.gamepad.ry * 600 * dt; }
     if (Math.abs(mdx) + Math.abs(mdy) > 0.5) this.lastMouse = this.time;
-    const sens = g.settings.mouseSens;
+    const pl = g.player;
+    const aimFoot = !!(pl.aiming && ch.state === 'foot');
+    if (pl.driveAim || pl.aiming || pl.hipT > 0) this.lastMouse = this.time; // no auto-follow while shooting
+    this.aimW = damp(this.aimW, aimFoot ? 1 : 0, 9, dt);
+    const sens = g.settings.mouseSens * (1 - 0.35 * this.aimW);
     this.yaw -= mdx * 0.0024 * sens;
-    this.pitch = clamp(this.pitch + mdy * 0.0021 * sens * (g.settings.invertY ? -1 : 1), -0.55, 1.25);
-    if (input.wheel) this.zoom = clamp(this.zoom + input.wheel * 0.12, 0.6, 2.2);
+    this.pitch = clamp(this.pitch + mdy * 0.0021 * sens * (g.settings.invertY ? -1 : 1), aimFoot ? -0.95 : -0.55, aimFoot ? 1.15 : 1.25);
+    // the mouse wheel zooms in vehicles; on foot it switches weapons
+    if (input.wheel && ch.state === 'vehicle') this.zoom = clamp(this.zoom + input.wheel * 0.12, 0.6, 2.2);
 
     // ---------------------------------------------------- framing target
     const veh = ch.vehicle;
@@ -51,7 +57,7 @@ export class CameraRig {
       _pivot.y += 0.9;
     } else {
       _pivot.copy(ch.pos);
-      _pivot.y += 1.55 * s;
+      _pivot.y += (1.55 + 0.06 * this.aimW) * s;
     }
     let speed = 0;
     if (veh) {
@@ -85,13 +91,13 @@ export class CameraRig {
     this.pivot.z = damp(this.pivot.z, _pivot.z, pk, dt);
 
     // ---------------------------------------------------- distance & fov
-    const footDist = (ch.speedScalar > 6 ? 4.4 : 3.7) * s;
-    const carDist = veh ? (veh.halfL * 1.25 + 2.6 + Math.min(speed, 40) * 0.035) : 6;
-    const want = lerp(footDist, carDist, this.carW) * this.zoom;
-    const fovT = lerp(60, 66 + Math.min(speed, 45) * 0.42, this.carW);
+    const footDist = lerp((ch.speedScalar > 6 ? 4.4 : 3.7) * this.zoom, 1.75, this.aimW) * s;
+    const carDist = veh ? (veh.halfL * 1.25 + 2.6 + Math.min(speed, 40) * 0.035) * this.zoom : 6;
+    const want = lerp(footDist, carDist, this.carW);
+    const fovT = lerp(lerp(60, 47, this.aimW), 66 + Math.min(speed, 45) * 0.42 - (pl.driveAim ? 8 : 0), this.carW);
     this.fov = damp(this.fov, fovT, 3, dt);
     // shoulder offset on foot
-    const shoulder = (1 - this.carW) * 0.38 * s;
+    const shoulder = (1 - this.carW) * lerp(0.38, 0.62, this.aimW) * s;
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     _dir.set(Math.sin(this.yaw) * cp, -sp, Math.cos(this.yaw) * cp); // view direction
     const rx = -Math.cos(this.yaw), rz = Math.sin(this.yaw);

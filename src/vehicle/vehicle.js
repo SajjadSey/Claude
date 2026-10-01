@@ -264,8 +264,13 @@ export class Vehicle {
       _v.copy(_up).negate();
       w.lastComp = w.comp;
       let found = false;
+      // a burst tyre runs on the flattened rubber: smaller effective radius
+      if (w.burst && !this.wheelShapeFlat) {
+        const r = T.wheelR * 0.8, hh = T.wheelW * 0.36, b = 0.05;
+        this.wheelShapeFlat = new R.RoundCylinder(hh - b, r - b, b);
+      }
       const sh = W.castShape({ x: _mount.x, y: _mount.y, z: _mount.z }, { x: _qw.x, y: _qw.y, z: _qw.z, w: _qw.w },
-        { x: _v.x, y: _v.y, z: _v.z }, this.wheelShape, 0.0, this.suspRest, false, undefined, filter, undefined, body);
+        { x: _v.x, y: _v.y, z: _v.z }, w.burst ? this.wheelShapeFlat : this.wheelShape, 0.0, this.suspRest, false, undefined, filter, undefined, body);
       if (sh && sh.time_of_impact > 1e-4) {
         const t = sh.time_of_impact;
         // witness1/normal1 lie on the hit collider and are already in world space
@@ -346,7 +351,7 @@ export class Vehicle {
       const vLong = _v.dot(_wf);
       const vLat = _v.dot(_ws);
       const surf = (SURFACE_GRIP[w.surface] ?? 0.9) * (1 - wet * (WET_LOSS[w.surface] ?? 0.25));
-      let mu = (w.front ? T.grip : T.rearGrip) * surf;
+      let mu = (w.front ? T.grip : T.rearGrip) * surf * (w.burst ? 0.45 : 1);
       // load sensitivity
       const nominal = T.mass * 9.81 / 4;
       mu *= clamp(1.12 - 0.12 * (Fz / nominal), 0.8, 1.1);
@@ -369,7 +374,7 @@ export class Vehicle {
         Fx -= Math.sign(vLong) * Math.min(abs, stopF);
       }
       // rolling resistance
-      Fx -= Math.sign(vLong) * Math.min(Math.abs(vLong) * 200, Fz * 0.013);
+      Fx -= Math.sign(vLong) * Math.min(Math.abs(vLong) * 200, Fz * (w.burst ? 0.09 : 0.013));
       // holding brake when idle
       if (throttle < 0.02 && Math.abs(vLong) < 0.6 && !this.driverless) {
         const hold = Math.abs(vLong) * (T.mass / 4) / h * 0.5;
@@ -706,7 +711,81 @@ export class Vehicle {
     }
   }
 
+  /* ---------------------------------------------------------------- tyres & glass */
+  /** Pop a tyre: the car drops onto the rim, loses grip and drags. */
+  burstTire(i) {
+    const w = this.wheels[i];
+    if (!w || w.burst) return;
+    w.burst = true;
+    w.r = this.T.wheelR * 0.8;
+    const g = this.game;
+    const p = this.localToWorld(_v.set(w.x, w.visualY, w.z), new THREE.Vector3());
+    g.effects?.debrisBurst(p, new THREE.Color(0.05, 0.05, 0.05), 14);
+    g.effects?.dust(p, 1);
+    g.audio?.tyreBurst?.(p);
+    // flattened rubber
+    const tire = w.spin.children[0];
+    if (tire) tire.scale.set(1, 0.84, 0.84);
+  }
+
+  /** A bullet at car-local point `local`: burst the tyre it hit, if any. */
+  bulletTire(local) {
+    const T = this.T;
+    for (let i = 0; i < this.wheels.length; i++) {
+      const w = this.wheels[i];
+      if (Math.abs(local.x - w.x) > T.wheelW * 0.75) continue;
+      const rr = Math.hypot(local.y - w.visualY, local.z - w.z);
+      if (rr > T.wheelR * 1.03) continue;
+      this.burstTire(i);
+      return true;
+    }
+    return false;
+  }
+
+  /** A bullet through the glasshouse: cracks first, side windows shatter on the second hit. */
+  glassHit(local, point) {
+    const T = this.T;
+    if (local.y < T.beltY + 0.03 || local.y > T.roofY + 0.06) return false;
+    const gm = this.model.glassMeshes;
+    let name = 'body';
+    if (Math.abs(local.z - this.model.seat.z) < 0.8 && Math.abs(local.x) > this.halfW - 0.4) name = local.x > 0 ? 'doorL' : 'doorR';
+    const st = this.glassState || (this.glassState = {});
+    const m = gm[name];
+    if (!m || !m.visible) return true;
+    const g = this.game;
+    if (!st[name]) {
+      st[name] = 1;
+      m.material = sharedCracked();
+      g.audio?.bulletImpact(point, false);
+    } else if (name !== 'body') {
+      st[name] = 2;
+      m.visible = false;
+      g.effects?.glass(point, 0.5);
+      g.audio?.glass(point);
+    }
+    return true;
+  }
+
+  /** Shatter one side window (shooting out of it from inside). */
+  smashWindow(name) {
+    const m = this.model.glassMeshes[name];
+    if (!m || !m.visible) return;
+    m.visible = false;
+    (this.glassState || (this.glassState = {}))[name] = 2;
+    const side = name === 'doorL' ? 1 : -1;
+    const p = this.localToWorld(_v.set(side * this.halfW, this.T.beltY + 0.25, this.model.seat.z), new THREE.Vector3());
+    this.game.effects?.glass(p, 0.4);
+    this.game.audio?.glass(p);
+  }
+
   repair() {
+    for (const w of this.wheels) {
+      if (!w.burst) continue;
+      w.burst = false;
+      w.r = this.T.wheelR;
+      const tire = w.spin.children[0];
+      if (tire) tire.scale.set(1, 1, 1);
+    }
     for (const mesh of this.model.deformables) {
       mesh.geometry.attributes.position.array.set(mesh.userData.orig);
       mesh.geometry.attributes.position.needsUpdate = true;

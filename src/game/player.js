@@ -1,11 +1,19 @@
 import * as THREE from 'three';
 import { EnterSequence, ExitSequence } from '../char/carSequences.js';
 import { clamp, approach, wrapAngle } from '../core/util.js';
+import { WEAPONS, WEAPON_ORDER, BULLET_FILTER } from './weapons.js';
 
 const _f = new THREE.Vector3();
 const _r = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _v = new THREE.Vector3();
+const _cf = new THREE.Vector3();
+const _o = new THREE.Vector3();
+const _bd = new THREE.Vector3();
+const _aim = new THREE.Vector3();
+const _mz = new THREE.Vector3();
+const _ej = new THREE.Vector3();
+const _side = new THREE.Vector3();
 
 export class PlayerController {
   constructor(game, ch) {
@@ -18,6 +26,154 @@ export class PlayerController {
     this.hornT = 0;
     this.seqAge = 0;
     this.nearVehicle = null;
+    // weapons (all free, unlimited ammo)
+    this.weapon = 'fists';
+    this.aiming = false;
+    this.driveAim = false;
+    this.fireT = 0;
+    this.hipT = 0;
+    this.bloom = 0;
+    this.wasFiring = false;
+    this.lastCrimeT = -10;
+    this.aimPoint = new THREE.Vector3();
+    this.aimOnTarget = false;
+  }
+
+  selectWeapon(key) {
+    if (!WEAPONS[key] || key === this.weapon) return;
+    this.weapon = key;
+    this.character.setWeapon(key);
+    this.game.audio?.weaponSwitch?.();
+    this.game.hud.setWeapon?.(WEAPONS[key]);
+  }
+
+  /** Weapon selection: 1-5, mouse wheel on foot, LB/RB on a gamepad on foot. */
+  weaponInput(onFoot) {
+    const inp = this.game.input;
+    for (let i = 0; i < WEAPON_ORDER.length; i++) if (inp.hit('Digit' + (i + 1))) this.selectWeapon(WEAPON_ORDER[i]);
+    let step = 0;
+    if (onFoot && inp.wheel) step = Math.sign(inp.wheel);
+    if (onFoot && inp.gamepad) { if (inp.gamepad.pressed('rb')) step = 1; if (inp.gamepad.pressed('lb')) step = -1; }
+    if (step) {
+      const i = WEAPON_ORDER.indexOf(this.weapon);
+      this.selectWeapon(WEAPON_ORDER[(i + step + WEAPON_ORDER.length) % WEAPON_ORDER.length]);
+    }
+  }
+
+  /** Where the crosshair points: camera ray, starting at the player's depth. */
+  computeAim(exclude) {
+    const g = this.game, cam = g.camera, ch = this.character;
+    cam.getWorldDirection(_cf);
+    _v.copy(ch.state === 'vehicle' && ch.vehicle ? ch.vehicle.curPos : ch.pos);
+    const depth = Math.max(0, _v.sub(cam.position).dot(_cf) - 0.6);
+    _o.copy(cam.position).addScaledVector(_cf, depth);
+    const hit = g.physics.raycast(_o, _cf, 250, BULLET_FILTER, exclude, ch.collider);
+    if (hit) {
+      this.aimPoint.copy(hit.point);
+      const o = g.physics.ownerOf(hit.collider);
+      this.aimOnTarget = !!o && ((o.type === 'char' && o.char.alive) || (o.type === 'ragdoll' && o.char && o.char.alive));
+      // people react to a gun pointed at them
+      if (this.aimOnTarget && o.type === 'char' && hit.dist < 30) {
+        const c = o.char;
+        if (c.isCop) { if (g.time - (this.threatT || -10) > 3) { this.threatT = g.time; g.police.crime('threatCop', c.pos); } }
+        else if (c.ai && c.ai.aimedAt) c.ai.aimedAt(ch);
+      }
+    } else {
+      this.aimPoint.copy(_o).addScaledVector(_cf, 250);
+      this.aimOnTarget = false;
+    }
+    return this.aimPoint;
+  }
+
+  /** Fire the current weapon once (all pellets) at the crosshair. */
+  shoot(W) {
+    const g = this.game, ch = this.character, cam = g.camera;
+    const veh = ch.state === 'vehicle' ? ch.vehicle : null;
+    cam.getWorldDirection(_cf);
+    const muzzle = ch.muzzleWorld(_mz);
+    const moving = ch.state === 'foot' && ch.speedScalar > 2;
+    const spread = ((this.aiming || this.driveAim) ? W.aimSpread : W.spread) * (1 + this.bloom) + (moving ? W.spread * 0.4 : 0) + (veh ? W.spread * 0.5 : 0);
+    const exclude = veh ? veh.body : null;
+    for (let p = 0; p < W.pellets; p++) {
+      // random direction inside the spread cone
+      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * spread;
+      _side.set(-_cf.z, 0, _cf.x).normalize();
+      _v.crossVectors(_side, _cf);
+      _bd.copy(_cf).addScaledVector(_side, Math.cos(a) * r).addScaledVector(_v, Math.sin(a) * r).normalize();
+      _v.copy(veh ? veh.curPos : ch.pos);
+      const depth = Math.max(0, _v.sub(cam.position).dot(_bd) - 0.6);
+      _o.copy(cam.position).addScaledVector(_bd, depth);
+      const hit = g.physics.raycast(_o, _bd, W.range, BULLET_FILTER, exclude, ch.collider);
+      _aim.copy(hit ? hit.point : _o.addScaledVector(_bd, W.range));
+      // the bullet itself leaves the muzzle
+      _bd.subVectors(_aim, muzzle);
+      const len = _bd.length();
+      _bd.divideScalar(Math.max(len, 1e-4));
+      const end = g.ballistics.shoot(ch, W, muzzle, _bd, Math.min(W.range, len + 0.8));
+      if (p < 3) g.ballistics.tracer(muzzle, end);
+    }
+    _cf.subVectors(this.aimPoint, muzzle).normalize();
+    g.effects.muzzle(muzzle, _cf);
+    _side.set(_cf.z, 0, -_cf.x).normalize().negate();
+    g.effects.shell(ch.ejectWorld(_ej), _side, _cf);
+    g.audio.gunshot(muzzle, W.key, true);
+    ch.recoilT = 1;
+    const rk = (this.aiming || this.driveAim) ? 0.55 : 1;
+    g.camRig.pitch -= W.recoil * rk * (0.8 + Math.random() * 0.4);
+    g.camRig.yaw += (Math.random() - 0.5) * W.recoil * 0.5 * rk;
+    g.camRig.shake(W.key === 'shotgun' ? 0.18 : 0.05);
+    this.bloom = Math.min(1.6, this.bloom + W.bloom);
+    g.peds.panic(muzzle, 40, muzzle);
+    if (g.time - this.lastCrimeT > 2) { this.lastCrimeT = g.time; g.police.crime('shooting', muzzle); }
+  }
+
+  /** Aiming / firing logic shared by on-foot and drive-by shooting. */
+  updateGun(dt, onFoot) {
+    const g = this.game, inp = g.input, ch = this.character, gp = inp.gamepad;
+    this.fireT -= dt;
+    this.hipT = Math.max(0, this.hipT - dt);
+    this.bloom = Math.max(0, this.bloom - dt * 2.4);
+    let W = WEAPONS[this.weapon];
+    const aimBtn = (inp.locked && inp.mouseDown(2)) || (gp && gp.lt > 0.5 && onFoot);
+    const fireBtn = (inp.locked && inp.mouseDown(0)) || (gp && gp.rt > 0.5 && onFoot);
+    this.aiming = false;
+    this.driveAim = false;
+    if (!onFoot) {
+      // drive-by: pistol or SMG out of the window
+      const veh = ch.vehicle;
+      if (!aimBtn || !veh) { ch.driveBy = null; this.wasFiring = false; return; }
+      if (!W.drive) { this.selectWeapon('smg'); W = WEAPONS.smg; g.hud.message('Drive-by: SMG · شلیک از ماشین', 1.4); }
+      this.driveAim = true;
+      const tgt = this.computeAim(veh.body);
+      const local = veh.worldToLocal(_v.copy(tgt), _v);
+      const hand = local.x > 0 ? 'L' : 'R';
+      ch.driveBy = { target: tgt, hand };
+      if (fireBtn && this.fireT <= 0 && (W.auto || !this.wasFiring)) {
+        // first shot out of a closed side window breaks it
+        if (Math.abs(local.x) > Math.abs(local.z) * 0.5) veh.smashWindow(hand === 'L' ? 'doorL' : 'doorR');
+        this.shoot(W);
+        this.fireT = W.rate;
+      }
+      this.wasFiring = fireBtn;
+      return;
+    }
+    ch.driveBy = null;
+    if (!W.hold) { this.wasFiring = false; ch.aimTarget = null; return; }
+    this.aiming = !!aimBtn;
+    if (fireBtn) this.hipT = 0.9;
+    const raised = this.aiming || this.hipT > 0;
+    if (raised) {
+      ch.aimTarget = this.computeAim(null);
+      ch.input.face = g.camRig.yaw;
+    } else {
+      ch.aimTarget = null;
+      ch.input.face = null;
+    }
+    if (fireBtn && this.fireT <= 0 && ch.aimW > 0.55 && (W.auto || !this.wasFiring)) {
+      this.shoot(W);
+      this.fireT = W.rate;
+    }
+    this.wasFiring = fireBtn;
   }
 
   axes() {
@@ -55,7 +211,15 @@ export class PlayerController {
       ch.input.mag = this.moveIntent;
       ch.input.mode = sprint ? 'sprint' : this.walk ? 'walk' : 'run';
       if (inp.hit('Space') || (gp && gp.pressed('x'))) ch.input.jump = true;
-      if ((inp.mouseHit(0) && inp.locked) || inp.hit('KeyQ') || (gp && gp.pressed('b'))) ch.punch();
+      this.weaponInput(true);
+      const armed = !!WEAPONS[this.weapon].hold;
+      if ((!armed && inp.mouseHit(0) && inp.locked) || inp.hit('KeyQ') || (gp && gp.pressed('b'))) ch.punch();
+      this.updateGun(dt, true);
+      if (this.aiming || this.hipT > 0) {
+        // aiming: jog at most, no sprint
+        if (ch.input.mode === 'sprint') ch.input.mode = 'run';
+        ch.input.mag = Math.min(ch.input.mag, this.aiming ? 0.55 : 0.8);
+      }
       // head follows the camera
       ch.lookYaw = clamp(wrapAngle(g.camRig.yaw - ch.yaw), -1.2, 1.2) * (Math.abs(wrapAngle(g.camRig.yaw - ch.yaw)) < 2.2 ? 1 : 0);
       ch.lookPitch = -g.camRig.pitch * 0.4;
@@ -77,6 +241,7 @@ export class PlayerController {
         g.hud.setPrompt('');
       }
     } else if (ch.state === 'seq') {
+      ch.aimTarget = null; ch.driveBy = null; ch.input.face = null; this.aiming = false; this.driveAim = false;
       this.seqAge += dt;
       g.hud.setPrompt('');
       const seq = ch.seq;
@@ -94,6 +259,8 @@ export class PlayerController {
     } else if (ch.state === 'vehicle') {
       g.hud.setPrompt('');
       const v = ch.vehicle;
+      this.weaponInput(false);
+      this.updateGun(dt, false);
       if (v.driver === ch) {
         let thr = (inp.down('KeyW') || inp.down('ArrowUp')) ? 1 : 0;
         let brk = (inp.down('KeyS') || inp.down('ArrowDown')) ? 1 : 0;
@@ -134,6 +301,7 @@ export class PlayerController {
         if (v.speed < 6.5 && !v.doorClear(side)) {
           side = v.doorClear(-side) ? -side : 0;
         }
+        ch.driveBy = null;
         if (side) new ExitSequence(g, ch, v, side);
         else g.hud.message('Blocked — can\'t get out here · راه خروج بسته است', 1.6);
       }

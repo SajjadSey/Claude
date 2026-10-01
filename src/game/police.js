@@ -36,6 +36,8 @@ const CRIMES = {
   stealCop: { pts: 5, witness: false, min: 2 },
   killCop: { pts: 8, witness: false, min: 2 },
   explosion: { pts: 3, witness: false, min: 1 },
+  shooting: { pts: 2, witness: true },
+  threatCop: { pts: 1, witness: false, min: 1 },
 };
 
 const N = CITY.N;
@@ -164,7 +166,7 @@ export class PoliceDriver extends DriverAI {
 
   update(dt) {
     const v = this.veh;
-    if (this.disabled || !v.driver || v.driver.state !== 'vehicle' || v.health <= 0) {
+    if (this.disabled || !v.driver || v.driver.state !== 'vehicle' || !v.driver.alive || v.health <= 0) {
       // parked: handbrake only (the foot brake on a stopped car would select reverse)
       v.input.throttle = 0; v.input.brake = v.speed > 1.5 ? 0.6 : 0; v.input.steer = 0; v.input.handbrake = v.speed <= 1.5;
       return;
@@ -321,17 +323,6 @@ export class PoliceManager {
     this.arrestT = 0;
     this.ramT = 0;
     this.rng = makeRng(9001);
-    this.tracers = [];
-    const mat = new THREE.LineBasicMaterial({ color: 0xffe2a0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false });
-    for (let i = 0; i < 8; i++) {
-      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-      const line = new THREE.Line(geo, mat.clone());
-      line.visible = false;
-      line.frustumCulled = false;
-      line.life = 0;
-      game.scene.add(line);
-      this.tracers.push(line);
-    }
   }
 
   get stars() { return this.wanted.stars; }
@@ -481,13 +472,6 @@ export class PoliceManager {
     if (this.arrestT > 1.3 && pc.alive && !g.bustedT) {
       this.arrestT = 0;
       g.onBusted?.();
-    }
-    // tracers fade
-    for (const t of this.tracers) {
-      if (!t.visible) continue;
-      t.life -= dt;
-      t.material.opacity = Math.max(0, t.life / 0.07) * 0.9;
-      if (t.life <= 0) t.visible = false;
     }
   }
 
@@ -847,21 +831,10 @@ export class PoliceManager {
       if (chest.distanceTo(end) < 6 || dist < 20) g.audio.whiz(chest);
     }
     g.effects.muzzle(muzzle, _d);
-    g.audio.gunshot(muzzle);
-    this.tracer(muzzle, end);
+    g.audio.gunshot(muzzle, 'pistol');
+    g.ballistics.tracer(muzzle, end);
+    c.recoilT = 1;
     g.peds.panic(muzzle, 35, muzzle);
   }
 
-  tracer(a, b) {
-    const t = this.tracers.find((x) => !x.visible) || this.tracers[0];
-    const pos = t.geometry.attributes.position;
-    // only the far 60% of the segment, like a streak flying away from the barrel
-    _v.copy(a).lerp(b, 0.25);
-    pos.setXYZ(0, _v.x, _v.y, _v.z);
-    pos.setXYZ(1, b.x, b.y, b.z);
-    pos.needsUpdate = true;
-    t.visible = true;
-    t.life = 0.07;
-    t.material.opacity = 0.9;
-  }
 }

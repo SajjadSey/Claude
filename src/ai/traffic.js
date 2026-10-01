@@ -143,6 +143,12 @@ export class DriverAI {
       if (!this.disabled) { v.input.throttle = 0; v.input.brake = 0.3; }
       return;
     }
+    if (!v.driver.alive) {
+      // shot at the wheel: the car rolls on and drifts off line
+      v.input.throttle = 0; v.input.brake = 0; v.input.handbrake = false;
+      v.input.steer = Math.sin(v.id * 7.3) * 0.25;
+      return;
+    }
     if (v.health <= 0) { v.input.throttle = 0; v.input.brake = 1; return; }
     const pos = v.curPos;
     const fwd = v.forward(_v);

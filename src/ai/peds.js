@@ -53,6 +53,15 @@ export class PedAI {
     this.fleeT = t + this.rng.range(0, 3);
   }
 
+  /** A gun pointed at us: hands up for a moment, then run. */
+  aimedAt(by) {
+    if (this.mode === 'flee' || this.mode === 'fight' || this.mode === 'surrender') return;
+    this.mode = 'surrender';
+    this.surrenderT = this.rng.range(1.2, 2.6);
+    this.threat.copy(by.pos);
+    this.game.audio?.shout?.(this.c.pos, this.c.app.female);
+  }
+
   fight(target) {
     this.mode = 'fight';
     this.target = target;
@@ -64,7 +73,16 @@ export class PedAI {
     const g = this.game;
     const raining = g.weather ? g.weather.rain > 0.2 : false;
     c.umbrellaOn = raining && this.hasUmbrella && (this.mode === 'walk' || this.mode === 'wait');
+    c.handsUp = this.mode === 'surrender' && c.state === 'foot';
     if (c.state !== 'foot') return;
+    if (this.mode === 'surrender') {
+      this.surrenderT -= dt;
+      c.input.mag = 0;
+      c.input.face = Math.atan2(this.threat.x - c.pos.x, this.threat.z - c.pos.z);
+      if (this.surrenderT <= 0) { c.input.face = null; c.handsUp = false; this.flee(this.threat, 9); }
+      return;
+    }
+    c.input.face = null;
     const nodes = g.city.pedNodes;
     let dirX = 0, dirZ = 0, mag = 0, mode = 'walk';
     if (this.mode === 'flee') {

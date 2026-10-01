@@ -7,7 +7,8 @@ import { solveTwoBone, setWorldQuat } from './ik.js';
 import { R, G, groups } from '../core/physics.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 const R_CharacterCollision = RAPIER.CharacterCollision;
-import { clamp, lerp, damp, approach, approachAngle, wrapAngle, smooth01, quatFromYaw, UP, makeRng } from '../core/util.js';
+import { clamp, lerp, damp, approach, approachAngle, wrapAngle, smooth01, quatFromYaw, quatFromBasis, UP, makeRng } from '../core/util.js';
+import { WEAPONS, buildWeaponModel } from '../game/weapons.js';
 
 export const SPEEDS = { walk: 1.45, run: 5.1, sprint: 7.6 };
 
@@ -26,57 +27,14 @@ const _xAxis = new THREE.Vector3(1, 0, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
 const _m = new THREE.Matrix4();
 const _coll = new R_CharacterCollision();
+const _wLeft = new THREE.Vector3(), _wRight = new THREE.Vector3(), _wDir = new THREE.Vector3(), _wLow = new THREE.Vector3();
+const _wSR = new THREE.Vector3(), _wSL = new THREE.Vector3(), _wGrip = new THREE.Vector3(), _wFore = new THREE.Vector3();
+const _wX = new THREE.Vector3(), _wY = new THREE.Vector3(), _wZ = new THREE.Vector3(), _wZ2 = new THREE.Vector3();
+const _wPR = new THREE.Vector3(), _wPL = new THREE.Vector3();
+const _wQR = new THREE.Quaternion(), _wQL = new THREE.Quaternion();
 
 let CHAR_ID = 1;
 
-// service pistol, built once and shared (hand-local: barrel along -Y, slide on the thumb side +Z)
-let GUN_PARTS = null;
-// umbrella for pedestrians in the rain (grip at the origin, canopy above)
-let UMB_GEO = null;
-const UMB_MATS = {};
-const UMB_COLORS = ['#141418', '#1d2a4d', '#8c1c24', '#e1b52c', '#2f6b3a', '#5a2d6e', '#d8d8d8', '#c2410c'];
-function makeUmbrella(seed) {
-  if (!UMB_GEO) {
-    UMB_GEO = {
-      canopy: new THREE.ConeGeometry(0.56, 0.24, 8, 1, true).translate(0, 0.76, 0),
-      shaft: new THREE.CylinderGeometry(0.008, 0.008, 0.86, 6).translate(0, 0.38, 0),
-      tip: new THREE.CylinderGeometry(0.004, 0.009, 0.08, 6).translate(0, 0.91, 0),
-      handle: new THREE.TorusGeometry(0.035, 0.008, 5, 10, Math.PI).rotateZ(Math.PI).translate(0.035, -0.04, 0),
-    };
-    for (const g of Object.values(UMB_GEO)) g.userData.shared = true;
-    UMB_MATS.dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1c, roughness: 0.5, metalness: 0.4 });
-  }
-  const col = UMB_COLORS[seed % UMB_COLORS.length];
-  if (!UMB_MATS[col]) UMB_MATS[col] = new THREE.MeshStandardMaterial({ color: col, roughness: 0.45, side: THREE.DoubleSide });
-  const g = new THREE.Group();
-  const canopy = new THREE.Mesh(UMB_GEO.canopy, UMB_MATS[col]);
-  canopy.castShadow = true;
-  g.add(canopy, new THREE.Mesh(UMB_GEO.shaft, UMB_MATS.dark), new THREE.Mesh(UMB_GEO.tip, UMB_MATS.dark), new THREE.Mesh(UMB_GEO.handle, UMB_MATS.dark));
-  g.visible = false;
-  return g;
-}
-
-function makeGun() {
-  if (!GUN_PARTS) {
-    const metal = new THREE.MeshStandardMaterial({ color: 0x1b1c20, roughness: 0.45, metalness: 0.7 });
-    const grip = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.8, metalness: 0.1 });
-    GUN_PARTS = [
-      [new THREE.BoxGeometry(0.03, 0.19, 0.034).translate(0.012, -0.1, 0.056), metal],
-      [new THREE.BoxGeometry(0.027, 0.04, 0.105).translate(0.012, -0.055, -0.004), grip],
-      [new THREE.BoxGeometry(0.008, 0.035, 0.02).translate(0.012, -0.085, 0.026), metal],
-      [new THREE.CylinderGeometry(0.007, 0.007, 0.012, 8).rotateX(Math.PI / 2).rotateX(Math.PI / 2).translate(0.012, -0.198, 0.058), metal],
-    ];
-    for (const [g] of GUN_PARTS) g.userData.shared = true;
-  }
-  const gun = new THREE.Group();
-  for (const [g, m] of GUN_PARTS) {
-    const mesh = new THREE.Mesh(g, m);
-    mesh.castShadow = true;
-    gun.add(mesh);
-  }
-  gun.visible = false;
-  return gun;
-}
 
 export class Character {
   constructor(game, appearance, opts = {}) {
@@ -106,6 +64,13 @@ export class Character {
     this.armed = !!opts.armed;
     this.aimTarget = null;
     this.aimW = 0;
+    this.holdW = 0;
+    this.recoilT = 0;
+    this.guns = {};
+    this.gunsL = {};
+    this.gun = null;
+    this.weapon = 'fists';
+    this.driveBy = null;
     this.handsUp = false;
     this.handsUpW = 0;
     this.umbrellaOn = false;
@@ -128,10 +93,7 @@ export class Character {
     this.lastHitTime = -10;
     this.rng = makeRng(this.id * 31 + 7);
     this.createCapsule();
-    if (this.armed) {
-      this.gun = makeGun();
-      this.rig.bones.handR.add(this.gun);
-    }
+    if (this.armed) this.setWeapon('pistol');
     this.footstepTimer = 0;
     this.seatedCache = null;
     this.ai = null;
@@ -346,37 +308,70 @@ export class Character {
     this.updateAim(dt);
   }
 
-  /** Pistol aim (right arm on the target, left hand supporting) and the hands-up surrender pose. */
+  /* --------------------------------------------------------------- weapons */
+  /** Select a weapon (model appears in the right hand; fists = none). */
+  setWeapon(key) {
+    if (!WEAPONS[key]) key = 'fists';
+    this.weapon = key;
+    for (const k in this.guns) this.guns[k].visible = false;
+    for (const k in this.gunsL) this.gunsL[k].visible = false;
+    if (WEAPONS[key].hold && !this.guns[key]) {
+      const m = buildWeaponModel(key);
+      this.rig.bones.handR.add(m);
+      this.guns[key] = m;
+    }
+    this.gun = this.guns[key] || null;
+  }
+
+  /** Left-hand copy of a one-handed gun (shooting out of the driver's window). */
+  gunLeft(key) {
+    if (!this.gunsL[key]) {
+      const m = buildWeaponModel(key);
+      m.scale.x = -1; // mirror for the left hand
+      this.rig.bones.handL.add(m);
+      this.gunsL[key] = m;
+    }
+    return this.gunsL[key];
+  }
+
+  get activeGun() {
+    if (this.driveBy && this.driveBy.hand === 'L') return this.gunsL[this.weapon] || this.gun;
+    return this.gun;
+  }
+
+  /**
+   * Weapon handling on foot: guns are held with hand IK so they line up exactly with the aim
+   * (right hand on the grip with the stock in the shoulder, left hand on the foregrip). Long guns
+   * are carried at low ready when not aiming. Also: the surrender pose and the umbrella.
+   */
   updateAim(dt) {
     const rig = this.rig;
-    this.aimW = approach(this.aimW, this.aimTarget && this.state === 'foot' ? 1 : 0, dt * 5);
-    if (this.gun) this.gun.visible = this.aimW > 0.05;
-    if (this.aimW > 0.001) {
-      if (this.aimTarget) (this.lastAim || (this.lastAim = new THREE.Vector3())).copy(this.aimTarget);
-      const t = this.lastAim;
-      const s = rig.scale;
-      const dx = t.x - this.pos.x, dz = t.z - this.pos.z, dy = t.y - (this.pos.y + 1.4 * s);
-      const yawErr = clamp(wrapAngle(Math.atan2(dx, dz) - this.yaw), -0.75, 0.75);
-      const pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -0.9, 0.9);
-      const w = this.aimW;
-      _e.set(-Math.PI / 2 - pitch, yawErr + 0.1, 0, 'YXZ');
-      _q.setFromEuler(_e);
-      rig.bones.upperArmR.quaternion.slerp(_q, w);
-      _e.set(-0.06, 0, 0, 'XYZ');
-      _q.setFromEuler(_e);
-      rig.bones.forearmR.quaternion.slerp(_q, w);
-      _q.setFromAxisAngle(_zAxis, 1.3);
-      rig.bones.fingersR.quaternion.slerp(_q, w);
-      // support hand cups the grip
-      _e.set(-Math.PI / 2 - pitch + 0.2, yawErr - 0.55, 0, 'YXZ');
-      _q.setFromEuler(_e);
-      rig.bones.upperArmL.quaternion.slerp(_q, w * 0.9);
-      _e.set(-0.95, 0, 0, 'XYZ');
-      _q.setFromEuler(_e);
-      rig.bones.forearmL.quaternion.slerp(_q, w * 0.9);
-      // shoulders square up to the target
-      _q.setFromAxisAngle(UP, yawErr * 0.35 * w);
-      rig.bones.chest.quaternion.multiply(_q);
+    const W = WEAPONS[this.weapon] || WEAPONS.fists;
+    const hasGun = !!W.hold;
+    const onFoot = this.state === 'foot';
+    const aiming = hasGun && !!this.aimTarget && onFoot && !this.handsUp;
+    this.aimW = approach(this.aimW, aiming ? 1 : 0, dt * (aiming ? 10 : 5));
+    const lowReady = hasGun && W.hold !== 'pistol' && onFoot && !this.handsUp && this.umbW < 0.05;
+    this.holdW = approach(this.holdW || 0, lowReady ? 1 : 0, dt * 6);
+    this.recoilT = Math.max(0, (this.recoilT || 0) - dt * 9);
+    if (this.gun) this.gun.visible = hasGun && (onFoot || this.state === 'getup' || this.state === 'ragdoll' || this.state === 'dead' || (this.state === 'vehicle' && this.driveBy && this.driveBy.hand === 'R'));
+    if (aiming) (this.lastAim || (this.lastAim = new THREE.Vector3())).copy(this.aimTarget);
+    const w = Math.max(this.aimW, this.holdW);
+    if (hasGun && onFoot && w > 0.001) {
+      this.weaponPose(W, this.aimW, this.holdW);
+      this.weaponIK = true;
+    } else if (this.weaponIK) {
+      this.handIK.L = this.handIK.R = null;
+      this.weaponIK = false;
+    }
+    // flinch from a bullet hit
+    if (this.hitReact > 0) {
+      this.hitReact = Math.max(0, this.hitReact - dt * 1.6);
+      if (this.hitDir) {
+        _v.set(this.hitDir.z, 0, -this.hitDir.x).normalize();
+        _q.setFromAxisAngle(_v.applyQuaternion(_q2.copy(rig.root.quaternion).invert()), this.hitReact * 0.9);
+        rig.bones.chest.quaternion.multiply(_q);
+      }
     }
     // umbrella held overhead (pedestrians in the rain)
     this.umbW = approach(this.umbW, this.umbrellaOn && this.state === 'foot' && this.aimW < 0.05 ? 1 : 0, dt * 2.5);
@@ -416,10 +411,117 @@ export class Character {
     }
   }
 
-  /** World position of the pistol's muzzle. */
+  /** Hand IK targets for holding weapon W (aim weight aw, low-ready weight hw). */
+  weaponPose(W, aw, hw) {
+    const rig = this.rig, s = rig.scale;
+    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
+    _wLeft.set(fz, 0, -fx); // character's left
+    _wRight.copy(_wLeft).negate();
+    // lean the upper body into the aim (pitch)
+    if (aw > 0.001 && this.lastAim) {
+      rig.root.updateMatrixWorld(true);
+      rig.bones.chest.getWorldPosition(_v);
+      _wDir.subVectors(this.lastAim, _v).normalize();
+      const pitch = clamp(Math.asin(clamp(_wDir.y, -1, 1)), -1.0, 1.0);
+      _q.setFromAxisAngle(_xAxis, -pitch * 0.3 * aw);
+      rig.bones.spine.quaternion.multiply(_q);
+      rig.bones.chest.quaternion.multiply(_q);
+      // square the shoulders to the target
+      const yawErr = clamp(wrapAngle(Math.atan2(_wDir.x, _wDir.z) - this.yaw), -0.8, 0.8);
+      _q.setFromAxisAngle(UP, yawErr * 0.5 * aw);
+      rig.bones.chest.quaternion.multiply(_q);
+    }
+    rig.root.updateMatrixWorld(true);
+    rig.bones.upperArmR.getWorldPosition(_wSR);
+    rig.bones.upperArmL.getWorldPosition(_wSL);
+    // aim direction, blended with the low-ready carry direction
+    _wLow.set(fx * 0.88, -0.48, fz * 0.88).normalize();
+    if (W.hold === 'pistol') {
+      _wGrip.addVectors(_wSL, _wSR).multiplyScalar(0.5);
+      _wGrip.y -= 0.03 * s;
+      _wDir.copy(this.lastAim || _v.copy(_wGrip).addScaledVector(_wLow, 5)).sub(_wGrip).normalize();
+      _wDir.lerp(_wLow, 1 - aw).normalize();
+      _wGrip.addScaledVector(_wDir, 0.5 * s).addScaledVector(_wRight, 0.02 * s);
+    } else {
+      // shoulder pocket: inside of the right shoulder
+      _wGrip.copy(_wSR).addScaledVector(_wLeft, 0.075 * s);
+      _wGrip.y -= 0.035 * s;
+      if (this.lastAim && aw > 0.001) _wDir.copy(this.lastAim).sub(_wGrip).normalize().lerp(_wLow, 1 - aw).normalize();
+      else _wDir.copy(_wLow);
+      // at low ready the gun drops to the hip
+      if (aw < 0.999) _wGrip.addScaledVector(_wRight, 0.04 * (1 - aw) * s).add(_v.set(0, -0.2 * (1 - aw) * s, 0)).addScaledVector(_wDir, 0.06 * (1 - aw) * s);
+      _wGrip.addScaledVector(_wDir, W.stock * s);
+    }
+    // recoil: kick back and climb
+    if (this.recoilT > 0) {
+      _wGrip.addScaledVector(_wDir, -this.recoilT * (W.hold === 'long' ? 0.045 : 0.06) * s);
+      _wDir.y += this.recoilT * (W.hold === 'pistol' ? 0.22 : 0.1);
+      _wDir.normalize();
+    }
+    // right hand: fingers (-Y) along the barrel, thumb side (+Z) up
+    _wZ.set(0, 1, 0).addScaledVector(_wDir, -_wDir.y).normalize();
+    _wY.copy(_wDir).negate();
+    _wX.crossVectors(_wY, _wZ);
+    quatFromBasis(_wX, _wY, _wZ, _wQR);
+    // left hand: under the foregrip (long guns) or cupping the right hand (pistol)
+    if (W.hold === 'pistol') {
+      _wFore.copy(_wGrip).addScaledVector(_wLeft, 0.03 * s).addScaledVector(_wZ, -0.045 * s).addScaledVector(_wDir, 0.015 * s);
+      _wY.copy(_wRight).multiplyScalar(0.75).addScaledVector(_wDir, 0.45).addScaledVector(_wZ, 0.35).normalize().negate();
+    } else {
+      _wFore.copy(_wGrip).addScaledVector(_wDir, W.fore * s).addScaledVector(_wZ, -0.02 * s).addScaledVector(_wLeft, 0.015 * s);
+      _wY.copy(_wRight).multiplyScalar(0.8).addScaledVector(_wZ, 0.45).normalize().negate();
+    }
+    _wZ2.copy(_wDir).addScaledVector(_wY, -_wDir.dot(_wY)).normalize();
+    _wX.crossVectors(_wY, _wZ2);
+    quatFromBasis(_wX, _wY, _wZ2, _wQL);
+    const w = Math.max(aw, hw);
+    _wPR.set(0, -1, 0).addScaledVector(_wRight, 0.9);
+    _wPL.set(0, -1, 0).addScaledVector(_wLeft, 0.35).addScaledVector(_wDir, -0.2);
+    this.setHand('R', _wGrip, w, _wQR, _wPR, 0.95);
+    this.setHand('L', _wFore, w, _wQL, _wPL, 0.85);
+  }
+
+  /** Shooting out of a vehicle: the gun hand points at the target, the other stays on the wheel. */
+  driveByPose(veh) {
+    const db = this.driveBy;
+    const W = WEAPONS[this.weapon];
+    if (!db || !W || !W.drive) {
+      if (this.driveIK) { this.handIK.L = this.handIK.R = null; this.driveIK = false; }
+      for (const k in this.gunsL) this.gunsL[k].visible = false;
+      return;
+    }
+    const rig = this.rig;
+    rig.root.updateMatrixWorld(true);
+    const arm = db.hand;
+    rig.bones['upperArm' + arm].getWorldPosition(_wSR);
+    _wDir.subVectors(db.target, _wSR).normalize();
+    _wGrip.copy(_wSR).addScaledVector(_wDir, 0.56 * rig.scale);
+    if (this.recoilT > 0) { _wGrip.addScaledVector(_wDir, -this.recoilT * 0.06); _wDir.y += this.recoilT * 0.2; _wDir.normalize(); }
+    _wZ.set(0, 1, 0).addScaledVector(_wDir, -_wDir.y).normalize();
+    _wY.copy(_wDir).negate();
+    _wX.crossVectors(_wY, _wZ);
+    quatFromBasis(_wX, _wY, _wZ, _wQR);
+    const out = arm === 'L' ? 1 : -1;
+    _wPR.set(0, -1, 0).addScaledVector(_v.set(out, 0, 0).applyQuaternion(veh.curQuat), 0.8);
+    this.handIK.L = this.handIK.R = null;
+    this.setHand(arm, _wGrip, 1, _wQR, _wPR, 0.95);
+    this.driveIK = true;
+    if (arm === 'L') { const g = this.gunLeft(this.weapon); g.visible = true; if (this.gun) this.gun.visible = false; }
+    else { for (const k in this.gunsL) this.gunsL[k].visible = false; if (this.gun) this.gun.visible = true; }
+  }
+
+  /** World position of the active gun's muzzle (and its direction in outDir, optional). */
   muzzleWorld(out) {
     this.rig.root.updateMatrixWorld(true);
-    return this.gun ? this.gun.localToWorld(out.set(0.012, -0.205, 0.058)) : out.copy(this.pos).setY(this.pos.y + 1.4);
+    const g = this.activeGun;
+    if (!g) return out.copy(this.pos).setY(this.pos.y + 1.4);
+    return g.localToWorld(out.copy(g.userData.muzzle));
+  }
+
+  ejectWorld(out) {
+    const g = this.activeGun;
+    if (!g) return out.copy(this.pos).setY(this.pos.y + 1.3);
+    return g.localToWorld(out.copy(g.userData.eject));
   }
 
   /** Walking into a loose prop transfers momentum (80 kg body, slightly bouncy contact). */
@@ -688,9 +790,31 @@ export class Character {
       this.seatedCache.apply(this.rig);
       return;
     }
+    this.driveByPose(veh);
     this.seatedPose(veh, this.seatSide, dt);
+    if (!this.alive) this.slumpPose();
     if (!this.seatedCache) this.seatedCache = new Pose(this.rig.list.length);
     this.seatedCache.capture(this.rig);
+  }
+
+  /** Dead in the seat: slumped forward, arms limp. */
+  slumpPose() {
+    const rig = this.rig;
+    this.handIK.L = this.handIK.R = null;
+    _q.setFromAxisAngle(_xAxis, 0.45);
+    rig.bones.chest.quaternion.multiply(_q);
+    _q.setFromAxisAngle(_xAxis, 0.35);
+    rig.bones.neck.quaternion.multiply(_q);
+    _e.set(0.55, 0, 0.25 * (this.id % 2 ? 1 : -1), 'XYZ');
+    _q.setFromEuler(_e);
+    rig.bones.head.quaternion.multiply(_q);
+    for (const arm of ['L', 'R']) {
+      const sx = arm === 'L' ? 1 : -1;
+      _e.set(-0.25, 0, sx * 0.08, 'XYZ');
+      rig.bones['upperArm' + arm].quaternion.setFromEuler(_e);
+      _e.set(-0.35, 0, 0, 'XYZ');
+      rig.bones['forearm' + arm].quaternion.setFromEuler(_e);
+    }
   }
 
   /** Full seated driving pose with IK (hands on wheel, feet on pedals). */

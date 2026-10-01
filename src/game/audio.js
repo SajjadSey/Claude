@@ -218,11 +218,38 @@ export class AudioSys {
     this.tone(pos, { freq: f0, type: 'sawtooth', dur: 0.35, gain: 0.07, slide: 1.25, ref: 5, max: 50 });
     setTimeout(() => this.tone(pos, { freq: f0 * 1.2, type: 'sawtooth', dur: 0.3, gain: 0.06, slide: 0.8, ref: 5, max: 50 }), 220);
   }
-  gunshot(pos) {
+  gunshot(pos, kind = 'pistol', own = false) {
     if (!this.ready) return;
-    this.noiseBurst(pos, { dur: 0.05, type: 'highpass', freq: 2500, gain: 0.9, ref: 14, max: 320 });
-    this.noiseBurst(pos, { dur: 0.32, type: 'lowpass', freq: 2200, gain: 1.1, ref: 14, max: 320, sweep: 0.25 });
-    this.tone(pos, { freq: 150, dur: 0.18, gain: 0.8, slide: 0.35, ref: 14, max: 320 });
+    const k = own ? 0.75 : 1; // the player's own gun is right next to the listener
+    if (kind === 'smg') {
+      this.noiseBurst(pos, { dur: 0.035, type: 'highpass', freq: 3000, gain: 0.7 * k, ref: 14, max: 300 });
+      this.noiseBurst(pos, { dur: 0.16, type: 'lowpass', freq: 2600, gain: 0.8 * k, ref: 14, max: 300, sweep: 0.35 });
+      this.tone(pos, { freq: 190, dur: 0.1, gain: 0.5 * k, slide: 0.4, ref: 14, max: 300 });
+    } else if (kind === 'shotgun') {
+      this.noiseBurst(pos, { dur: 0.06, type: 'highpass', freq: 2000, gain: 1.0 * k, ref: 16, max: 380 });
+      this.noiseBurst(pos, { dur: 0.7, type: 'lowpass', freq: 1500, gain: 1.4 * k, ref: 16, max: 380, sweep: 0.2 });
+      this.tone(pos, { freq: 85, dur: 0.38, gain: 1.0 * k, slide: 0.45, ref: 16, max: 380 });
+      setTimeout(() => this.noiseBurst(pos, { dur: 0.05, type: 'bandpass', freq: 1400, q: 3, gain: 0.25 * k, ref: 4, max: 30 }), 380); // pump
+    } else if (kind === 'rifle') {
+      this.noiseBurst(pos, { dur: 0.05, type: 'highpass', freq: 3500, gain: 1.1 * k, ref: 16, max: 400 });
+      this.noiseBurst(pos, { dur: 0.42, type: 'lowpass', freq: 2100, gain: 1.15 * k, ref: 16, max: 400, sweep: 0.22 });
+      this.tone(pos, { freq: 125, dur: 0.2, gain: 0.8 * k, slide: 0.35, ref: 16, max: 400 });
+    } else {
+      this.noiseBurst(pos, { dur: 0.05, type: 'highpass', freq: 2500, gain: 0.9 * k, ref: 14, max: 320 });
+      this.noiseBurst(pos, { dur: 0.32, type: 'lowpass', freq: 2200, gain: 1.1 * k, ref: 14, max: 320, sweep: 0.25 });
+      this.tone(pos, { freq: 150, dur: 0.18, gain: 0.8 * k, slide: 0.35, ref: 14, max: 320 });
+    }
+  }
+  weaponSwitch() {
+    if (!this.ready) return;
+    this.noiseBurst(null, { dur: 0.05, type: 'bandpass', freq: 2200, q: 4, gain: 0.18 });
+    setTimeout(() => this.noiseBurst(null, { dur: 0.04, type: 'bandpass', freq: 3200, q: 5, gain: 0.14 }), 90);
+  }
+  tyreBurst(pos) {
+    if (!this.ready) return;
+    this.noiseBurst(pos, { dur: 0.25, type: 'lowpass', freq: 2500, gain: 1.2, ref: 12, max: 250, sweep: 0.3 });
+    this.tone(pos, { freq: 70, dur: 0.25, gain: 0.7, slide: 0.5, ref: 12, max: 250 });
+    this.noiseBurst(pos, { dur: 1.2, type: 'highpass', freq: 1500, gain: 0.2, ref: 6, max: 60, sweep: 0.5 });
   }
   bulletImpact(pos, soft = false) {
     if (!this.ready || !this.throttleKey('bimp', 0.03)) return;
