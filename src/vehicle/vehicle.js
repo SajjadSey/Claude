@@ -555,6 +555,26 @@ export class Vehicle {
     return this.localToWorld(_v, out);
   }
 
+  /** Is there room on this side to open the door and stand next to it? */
+  doorClear(side) {
+    const W = this.physics.world;
+    const T = this.T;
+    const filter = groups(G.ALL, G.STATIC | G.CAR | G.PROP);
+    const checks = [
+      // capsules float above kerb height so curbs and low steps don't count as blocking
+      [side * (this.halfW + 0.55), 1.05, this.model.seat.z + 0.1, 0.28],
+      [side * (this.halfW + 0.6), 1.05, T.zDoorRear - 0.2, 0.28],
+      [side * (this.halfW + 0.55), 1.05, (T.zDoorFront + T.zDoorRear) / 2 + 0.2, 0.22],
+    ];
+    for (const [x, y, z, r] of checks) {
+      this.localToWorld(_v.set(x, y, z), _v2);
+      const shape = new R.Capsule(0.38, r);
+      const hit = W.intersectionWithShape({ x: _v2.x, y: _v2.y, z: _v2.z }, { x: 0, y: 0, z: 0, w: 1 }, shape, undefined, filter, undefined, this.body);
+      if (hit) return false;
+    }
+    return true;
+  }
+
   /** Seat H-point in car-local coordinates for a side (+1 driver/left, -1 passenger). */
   seatLocal(side, out) {
     const s = this.model.seat;

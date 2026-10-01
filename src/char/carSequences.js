@@ -54,8 +54,36 @@ function groundY(game, x, z, nearY) {
 const _down = new THREE.Vector3(0, -1, 0);
 
 /* ======================================================================= ENTER */
+/** Slide across the front seats (passenger <-> driver). */
+function shuffleUpdate(seq, dt, fromSide, toSide, D = 0.75) {
+  const c = seq.c, v = seq.veh, rig = c.rig;
+  const u = clamp(seq.t / D, 0, 1);
+  if (!seq.shufFrom) {
+    seq.shufFrom = new Pose(rig.list.length).capture(rig);
+    seq.shufTo = new Pose(rig.list.length);
+  }
+  c.seatRoot(v, toSide, rig.root.position, rig.root.quaternion);
+  rig.root.updateMatrixWorld(true);
+  c.seatedPose(v, toSide, dt, { driver: toSide === 1 });
+  seq.shufTo.capture(rig);
+  const a = v.seatLocal(fromSide, new THREE.Vector3());
+  const b = v.seatLocal(toSide, new THREE.Vector3());
+  const k = smooth01(u);
+  const p = a.clone().lerp(b, k);
+  p.y += 0.06 * Math.sin(Math.PI * k) - rig.L.hipsY;
+  v.localToWorld(p, rig.root.position);
+  rig.root.quaternion.copy(v.curQuat);
+  rig.root.updateMatrixWorld(true);
+  seq.shufTo.apply(rig);
+  blendFrom(rig, seq.shufFrom, smooth01(u * 1.3));
+  rig.bones.spine.quaternion.multiply(_q.setFromAxisAngle(_xAxis, 0.2 * Math.sin(Math.PI * k)));
+  c.pos.copy(rig.root.position);
+  return u >= 1;
+}
+
 export class EnterSequence {
-  constructor(game, ch, veh, side = 1) {
+  constructor(game, ch, veh, side = 1, shuffle = false) {
+    this.shuffle = shuffle;
     this.game = game;
     this.c = ch;
     this.veh = veh;
@@ -154,6 +182,7 @@ export class EnterSequence {
       case 'jackRecover': this.jackRecover(dt); break;
       case 'sit': this.sit(dt); break;
       case 'close': this.close(dt); break;
+      case 'shuffleIn': this.shuffleIn(dt); break;
       default: break;
     }
     void c;
@@ -459,6 +488,10 @@ export class EnterSequence {
     }
     if (t >= 0.88) {
       c.clearHands();
+      if (this.shuffle && side === -1) {
+        this.setPhase('shuffleIn');
+        return;
+      }
       c.state = 'vehicle';
       c.seq = null;
       this.done = true;
@@ -466,16 +499,30 @@ export class EnterSequence {
       this.game.onEnteredVehicle?.(c, v);
     }
   }
+
+  shuffleIn(dt) {
+    const c = this.c, v = this.veh;
+    if (shuffleUpdate(this, dt, -1, 1)) {
+      v.passengers = v.passengers.filter((p) => p !== c);
+      if (v.driver && v.driver !== c) { this.abort('occupied'); return; }
+      v.driver = c;
+      c.seatSide = 1;
+      c.state = 'vehicle';
+      c.seq = null;
+      this.done = true;
+      this.game.onEnteredVehicle?.(c, v);
+    }
+  }
 }
 
 /* ======================================================================= EXIT */
 export class ExitSequence {
-  constructor(game, ch, veh) {
+  constructor(game, ch, veh, side = null) {
     this.game = game;
     this.c = ch;
     this.veh = veh;
-    this.side = ch.seatSide;
-    this.phase = 'openIn';
+    this.side = side ?? ch.seatSide;
+    this.phase = this.side !== ch.seatSide ? 'shuffleOut' : 'openIn';
     this.t = 0;
     this.done = false;
     this.from = new Pose(ch.rig.list.length);
@@ -530,6 +577,17 @@ export class ExitSequence {
     if (this.done) return;
     this.t += dt;
     if (this.veh.removed) { this.abort(); return; }
+    if (this.phase === 'shuffleOut') {
+      const c = this.c, v = this.veh;
+      if (shuffleUpdate(this, dt, c.seatSide, this.side)) {
+        if (v.driver === c) v.driver = null;
+        v.passengers.push(c);
+        c.seatSide = this.side;
+        this.doorStart = v.doorBySide(this.side).open;
+        this.setPhase('openIn');
+      }
+      return;
+    }
     if (this.phase === 'openIn') this.openIn(dt);
     else if (this.phase === 'out') this.out(dt);
     else if (this.phase === 'closeOut') this.closeOut(dt);

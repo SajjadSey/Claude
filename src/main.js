@@ -320,6 +320,7 @@ class Game {
       return;
     }
     this.time += dt;
+    this.autoQuality();
     if (input.hit('KeyN')) { this.env.cycle(); this.hud.message(`Time: ${this.env.presetName}`, 1.5); }
     if (input.hit('KeyM')) { this.audio.radioOn = !this.audio.radioOn; this.hud.message(this.audio.radioOn ? '📻 Radio ON' : '📻 Radio OFF', 1.2); }
     if (input.hit('F3') || input.hit('KeyP')) this.hud.showFps = !this.hud.showFps;
@@ -515,7 +516,10 @@ class Game {
 
   cycleQuality() {
     const order = ['low', 'medium', 'high'];
-    const k = order[(order.indexOf(this.settings.quality) + 1) % 3];
+    this.setQuality(order[(order.indexOf(this.settings.quality) + 1) % 3]);
+  }
+
+  setQuality(k) {
     this.settings.quality = k;
     store('nc_q', k);
     const q = QUALITY[k];
@@ -527,6 +531,29 @@ class Game {
     this.env.sun.shadow.mapSize.set(q.shadowMap, q.shadowMap);
     this.scene.traverse((o) => { if (o.material) { const ms = Array.isArray(o.material) ? o.material : [o.material]; for (const m of ms) m.needsUpdate = true; } });
     this.hud?.message(`Graphics: ${q.label}`, 1.5);
+    const qb = document.getElementById('quality');
+    if (qb) qb.textContent = `Graphics: ${q.label}`;
+  }
+
+  /** Measures the first seconds of play (wall clock) and steps quality down on slow machines. */
+  autoQuality() {
+    if (this.autoQDone || window.__NC_TEST) return;
+    const now = performance.now();
+    if (!this.autoQStart) { this.autoQStart = now; this.autoQN = 0; return; }
+    const el = (now - this.autoQStart) / 1000;
+    if (el < 2) { this.autoQN = 0; this.autoQMeasure = now; return; } // skip warm-up
+    this.autoQN++;
+    if (el > 8) {
+      const fps = this.autoQN / ((now - this.autoQMeasure) / 1000);
+      const order = ['low', 'medium', 'high'];
+      const i = order.indexOf(this.settings.quality);
+      if (fps < 32 && i > 0) {
+        this.setQuality(order[i - 1]);
+        this.hud.message(`Auto graphics: ${QUALITY[order[i - 1]].label} (${fps.toFixed(0)} FPS)`, 3);
+        this.autoQStart = now;
+        if (i - 1 === 0) this.autoQDone = true;
+      } else this.autoQDone = true;
+    }
   }
 
   onResize() {

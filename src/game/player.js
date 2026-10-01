@@ -64,8 +64,15 @@ export class PlayerController {
       if (veh) g.hud.setPrompt(`[F] ${veh.driver ? 'Hijack · دزدیدن ماشین' : 'Enter · سوار شدن'}  —  ${veh.T.label}`);
       else g.hud.setPrompt('');
       if (veh && this.enterPressed()) {
-        new EnterSequence(g, ch, veh, 1);
-        this.seqAge = 0;
+        let side = 1, shuffle = false;
+        if (!veh.doorClear(1)) {
+          if (!veh.driver && veh.doorClear(-1)) { side = -1; shuffle = true; }
+          else side = 0;
+        }
+        if (side) {
+          new EnterSequence(g, ch, veh, side, shuffle);
+          this.seqAge = 0;
+        } else g.hud.message('No room to open the door · جای باز کردن در نیست', 1.6);
         g.hud.setPrompt('');
       }
     } else if (ch.state === 'seq') {
@@ -122,7 +129,12 @@ export class PlayerController {
       if (this.enterPressed()) {
         v.input.throttle = 0; v.input.brake = 0; v.input.handbrake = false; v.input.steer = 0;
         this.steer = 0;
-        new ExitSequence(g, ch, v);
+        let side = ch.seatSide;
+        if (v.speed < 6.5 && !v.doorClear(side)) {
+          side = v.doorClear(-side) ? -side : 0;
+        }
+        if (side) new ExitSequence(g, ch, v, side);
+        else g.hud.message('Blocked — can\'t get out here · راه خروج بسته است', 1.6);
       }
     } else {
       g.hud.setPrompt('');

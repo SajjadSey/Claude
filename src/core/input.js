@@ -45,6 +45,13 @@ export class Input {
     });
     addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('mousemove', (e) => {
+      // fallback when pointer lock is unavailable: drag with the left button to look around
+      if (!this.locked && (this.buttons & 1) && e.target === this.dom) {
+        this.mouseDX += e.movementX;
+        this.mouseDY += e.movementY;
+        this.lastMouseMove = performance.now();
+        return;
+      }
       if (this.locked) {
         // Some browsers emit huge spikes when pointer lock engages; ignore those.
         if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
