@@ -671,6 +671,7 @@ export class Character {
     this.physics.removeBody(this.body);
     this.game.scene.remove(this.rig.root);
     this.rig.mesh.geometry.dispose();
+    this.rig.mesh.skeleton.dispose(); // frees the bone matrix texture
     for (const m of this.rig.materials) m.dispose();
   }
 }

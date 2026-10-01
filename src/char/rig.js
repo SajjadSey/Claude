@@ -13,6 +13,7 @@ export const BONE_NAMES = [
 export const SKIN_TONES = ['#f3cfb0', '#e6b58f', '#d39d74', '#b77a52', '#8d5a3a', '#6a4129', '#4e2f1e'];
 const HAIR_COLORS = ['#1b1410', '#2e1f16', '#4a3020', '#6b4a2e', '#a07040', '#d8b070', '#8a8a8a', '#c0392b'];
 const SHIRT_COLORS = ['#f2f2f2', '#1d1d1f', '#2f6db5', '#d9534f', '#3cb371', '#f0ad4e', '#8e44ad', '#16a085', '#ff7eb6', '#34495e', '#e67e22', '#00bcd4'];
+const ACCENTS = ['#ff5e8a', '#ffd23f', '#ffffff', '#1d1d1f'];
 const PANTS_COLORS = ['#2b3a55', '#1f2833', '#5a4a3a', '#c8b48a', '#3d3d3d', '#6c7a89', '#8b5a2b', '#e8e2d0'];
 const SHOE_COLORS = ['#f5f5f5', '#202020', '#7a5230', '#c0392b', '#2c3e50'];
 
@@ -26,7 +27,7 @@ export function randomAppearance(seed) {
     hair: r.pick(HAIR_COLORS.slice(0, female ? 8 : 7)),
     hairStyle: female ? r.pick(['long', 'ponytail', 'bob', 'long']) : r.pick(['short', 'buzz', 'short', 'curly', 'bald', 'short']),
     shirt: r.pick(SHIRT_COLORS),
-    shirtAccent: r.pick(SHIRT_COLORS),
+    shirtAccent: r.pick(ACCENTS),
     shirtKind: r.pick(['plain', 'plain', 'plain', 'stripes', 'hawaiian', 'plaid']),
     sleeve: r.pick(['short', 'short', 'long', female ? 'none' : 'short']),
     pants: r.pick(PANTS_COLORS),
@@ -358,7 +359,8 @@ export class Rig {
     const baseMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.0 });
     const mats = [baseMat];
     if (shirtGeos.length) {
-      const st = shirtTexture(app.shirtKind, app.shirt, app.shirtAccent || '#ff6699', app.seed || 1);
+      // shared, cached texture (no per-character seed so textures are reused instead of leaking)
+      const st = shirtTexture(app.shirtKind, app.shirt, app.shirtAccent || '#ff6699', 1);
       mats.push(new THREE.MeshStandardMaterial({ map: st, vertexColors: true, roughness: 0.82 }));
     }
     const mesh = new THREE.SkinnedMesh(geo, mats.length > 1 ? mats : baseMat);

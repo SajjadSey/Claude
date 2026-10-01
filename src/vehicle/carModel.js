@@ -811,7 +811,7 @@ export function buildCarModel(typeName, color, opts = {}) {
   return {
     T, root, profile: P, paint, lights, glassMeshes, doors, wheels, steeringWheel, steerFrame, wheelCenter, rimR, tilt,
     pedals, seat: new THREE.Vector3(sx, sy, sz), headLights, tailLights, siren, deformables, interior, details, lamps,
-    halfW: P.W, halfL: P.L, plate: plateText,
+    halfW: P.W, halfL: P.L, plate: plateText, plateMat,
   };
 }
 
@@ -902,6 +902,7 @@ function getWheelGeometry(R, W) {
   const disc = new THREE.CylinderGeometry(rimR * 0.8, rimR * 0.8, 0.025, 24).rotateZ(Math.PI / 2).translate(hw * 0.2, 0, 0);
   const caliper = new THREE.BoxGeometry(0.06, 0.1, 0.14).translate(hw * 0.32, 0, 0);
   const res = { tire, rim, disc, caliper };
+  for (const g of Object.values(res)) g.userData.shared = true;
   wheelCache.set(key, res);
   return res;
 }

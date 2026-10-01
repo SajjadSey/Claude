@@ -678,11 +678,13 @@ export class Vehicle {
     this.removed = true;
     this.game.scene.remove(this.root);
     this.physics.removeBody(this.body);
+    // free per-car GPU resources (wheel geometry and the shared materials are cached and kept)
     this.root.traverse((o) => {
-      if (o.isMesh) {
-        if (this.model.deformables.includes(o)) o.geometry.dispose();
-      }
+      if (o.isMesh && o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
     });
+    this.model.paint.dispose();
+    for (const m of Object.values(this.model.lights)) m.dispose();
+    if (this.model.plateMat) { this.model.plateMat.map?.dispose(); this.model.plateMat.dispose(); }
   }
 }
 

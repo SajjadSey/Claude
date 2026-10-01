@@ -102,7 +102,7 @@ export class CameraRig {
     const P = g.physics;
     _want.copy(_dir).multiplyScalar(-1);
     const exclude = veh ? veh.body : null;
-    const hit = P.raycast(piv, _want, want + 0.3, groups(G.ALL, G.STATIC), exclude);
+    const hit = P.raycast(piv, _want, want + 0.3, groups(G.ALL, G.STATIC | G.CAR), exclude);
     let d = want;
     if (hit) d = Math.max(0.6, hit.dist - 0.3);
     this.curDist = d < this.curDist ? d : damp(this.curDist, d, 3, dt);

@@ -16,6 +16,7 @@ Everything (city, cars, people, textures, sounds, music) is generated procedural
 
 No installation is needed: the game is one self‑contained 5 MB HTML file and runs offline.
 It needs a GPU with WebGL2 support, which any PC from the last ten years has. For the best result use Chrome or Edge.
+On slower machines the game lowers its graphics quality automatically. You can also change it with `F2`.
 
 ## 🎮 Controls · کنترل‌ها
 
@@ -49,6 +50,8 @@ If there is a driver, they reach in, drag the driver out (arms flailing) and thr
 They duck under the roof, put the inner leg in first, sit, bring the other leg in, and pull the door shut by its inner handle. The car dips on its springs as they sit and when the door slams.
 While driving, the hands hold the steering wheel and follow it as it turns, and the right foot moves between the throttle and brake pedals.
 Getting out reverses all of this: open the door, swing one leg out, stand, and push the door closed.
+If the driver's door is blocked by a wall or another car, the character uses the passenger door and slides across the seats; nobody clips through geometry.
+At speed, pressing F makes you bail out and tumble across the road.
 
 **Car physics**
 - Raycast suspension with springs, separate bump and rebound damping, bump stops and anti‑roll bars. Bodies visibly roll, pitch and bounce.
@@ -56,13 +59,15 @@ Getting out reverses all of this: open the door, swing one leg out, stand, and p
 - Engine torque curve, automatic 6‑speed gearbox, rev limiter, clutch slip at launch, drag and downforce.
 - Grip depends on the surface: asphalt, concrete, grass, sand.
 - Crash damage: the body panels dent where they were hit, glass cracks, lights break, doors can pop open, and a badly damaged engine smokes and loses power.
+- Wrecked cars (and cars left on their roof) catch fire and explode. The blast throws nearby cars, props and people.
 - An open door swings on its own as the car accelerates and brakes, and slams shut in the airflow.
 - Effects: tyre smoke, skid marks, sparks, glass shards.
 
 **Characters**
 - A procedurally modelled, skinned human with smooth joints, a face (eyes, brows, nose, ears, mouth), hair styles and clothing. Pedestrians get random body types, skin tones, outfits, hairstyles, glasses and caps.
 - Locomotion is fully procedural and uses inverse kinematics (IK) to plant each foot on the ground, so feet don't slide. Heel strike and toe‑off roll, pelvis bob/sway/twist, counter‑swinging arms, leaning into speed and turns, small steps when turning on the spot, and stepping up and down curbs.
-- Full‑body ragdolls with anatomical joint limits, for people hit by cars, punched, thrown out of cars or falling. When it's over they get up with a real get‑up sequence, from either lying on their back or face down.
+- Full‑body ragdolls with anatomical joint limits, for people hit by cars, punched, thrown out of cars, caught in explosions or falling. Ragdolls collide with each other, with cars and with the world. Afterwards they get up with a real get‑up sequence, from either lying on their back or face down.
+- Sprinting into someone knocks them over. Pedestrians you punch either run away or fight back.
 
 **World**
 - A city of about 0.5 km² with art‑deco, hotel, stucco, brick and glass towers, neon signs, palm trees, parks with fountains, parking lots, a stunt park with ramps, a beach, and the ocean.
