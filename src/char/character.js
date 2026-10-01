@@ -306,8 +306,8 @@ export class Character {
     const dmg = (sp - 3) * (sp > 12 ? 11 : 7);
     this.damage(dmg, 'car', veh);
     // launch: most of the car's velocity, upward kick, a little sideways off the bonnet
-    _v2.copy(vc).multiplyScalar(0.88);
-    _v2.y = Math.max(_v2.y, 0) + 1.0 + sp * 0.16;
+    _v2.copy(vc).multiplyScalar(sp > 9 ? 0.72 : 0.85);
+    _v2.y = Math.max(_v2.y, 0) + 1.1 + sp * 0.13;
     _v3.set(Math.sign(local.x || 1), 0, 0).applyQuaternion(veh.curQuat).multiplyScalar(0.6 + sp * 0.04);
     _v2.add(_v3);
     this.toRagdoll(_v2, { spin: 0.8 + sp * 0.18 });

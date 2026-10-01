@@ -25,7 +25,7 @@ export class Physics {
     this.h = 1 / 120;
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.world.timestep = this.h;
-    this.world.numSolverIterations = 6;
+    this.world.numSolverIterations = 4;
     this.eq = new RAPIER.EventQueue(true);
     this.fixed = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     this.owners = new Map(); // collider handle -> owner descriptor

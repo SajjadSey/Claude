@@ -155,7 +155,7 @@ export class GeoBucket {
 /** Tapered tube along a list of points (used for palm trunks etc.). */
 export function taperedTube(points, r0, r1, radial = 10) {
   const curve = new THREE.CatmullRomCurve3(points);
-  const segs = points.length * 6;
+  const segs = points.length * 3;
   const g = new THREE.TubeGeometry(curve, segs, 1, radial, false);
   const pos = g.attributes.position;
   // scale radius along the curve: TubeGeometry builds rings in order

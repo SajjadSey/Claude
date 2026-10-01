@@ -63,7 +63,8 @@ export class Vehicle {
       const cd = R.ColliderDesc.roundCuboid(hx - 0.05, hy - 0.05, hz - 0.05, 0.05)
         .setTranslation(cx, cy, cz)
         .setDensity(0)
-        .setFriction(0.45)
+        .setFriction(0.3)
+        .setFrictionCombineRule(R.CoefficientCombineRule.Min)
         .setRestitution(0.12)
         .setCollisionGroups(groups(G.CAR, G.ALL))
         .setSolverGroups(groups(G.CAR, G.ALL & ~G.CHAR))
@@ -428,6 +429,27 @@ export class Vehicle {
     this.accelLocal.lerp(acc, 0.3);
     this.updateDoors(dt);
     this.damageCooldown = Math.max(0, this.damageCooldown - dt);
+    // put idle, driverless cars to sleep so they cost nothing
+    if (!this.driver && !this.body.isSleeping()) {
+      const av = this.body.angvel();
+      if (this.speed < 0.08 && Math.abs(av.x) + Math.abs(av.y) + Math.abs(av.z) < 0.08 && this.grounded >= 4) this.idleT = (this.idleT || 0) + dt;
+      else this.idleT = 0;
+      if (this.idleT > 0.8 && this.model.doors.every((d) => d.latched || d.scripted === false && d.vel === 0)) { this.body.sleep(); this.idleT = 0; }
+    }
+    // level of detail
+    const cam = this.game.camera;
+    if (cam) {
+      const d2 = cam.position.distanceToSquared(this.curPos);
+      const near = d2 < 45 * 45 || this.driver === this.game.player?.character;
+      if (near !== this.lodNear) {
+        this.lodNear = near;
+        this.model.interior.visible = near;
+        this.model.details.visible = near || d2 < 90 * 90;
+        for (const d of this.model.doors) d.card.visible = near;
+      }
+      const mid = d2 < 90 * 90;
+      if (mid !== this.lodMid) { this.lodMid = mid; this.model.details.visible = mid; for (const w of this.wheels) w.mount.children[0].children.forEach((c) => { if (!c.isGroup) c.visible = mid; }); }
+    }
     // lights
     const L = this.model.lights;
     const braking = (this.effBrake || 0) > 0.1;
@@ -559,9 +581,8 @@ export class Vehicle {
     if (amount > 0.35) {
       const gm = this.model.glassMeshes;
       const crack = (name) => { if (gm[name]) gm[name].material = sharedCracked(); };
-      if (local.z > 0.5) crack('wind');
-      else if (local.z < -0.8) crack('rear');
-      else crack(local.x > 0 ? (local.z > this.T.zB[1] ? 'doorL' : 'sideL') : (local.z > this.T.zB[1] ? 'doorR' : 'sideR'));
+      if (Math.abs(local.z) > 0.8 || local.z < this.T.zB[1]) crack('body');
+      else crack(local.x > 0 ? 'doorL' : 'doorR');
       if (amount > 0.5) this.game.effects?.glass(worldPoint, amount);
     }
     // a hard side impact can pop a door open

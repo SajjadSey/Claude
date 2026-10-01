@@ -266,7 +266,7 @@ export class TrafficManager {
   constructor(game) {
     this.game = game;
     this.cars = [];
-    this.target = 13;
+    this.target = 11;
     this.spawnTimer = 0;
     this.rng = makeRng(4242);
   }

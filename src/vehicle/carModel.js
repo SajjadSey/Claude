@@ -439,10 +439,7 @@ export function buildCarModel(typeName, color, opts = {}) {
     glassMeshes[name] = m;
     return m;
   };
-  makeGlass('wind', glassTris.wind, root);
-  makeGlass('rear', glassTris.rear, root);
-  makeGlass('sideL', glassTris.sideL, root);
-  makeGlass('sideR', glassTris.sideR, root);
+  makeGlass('body', [...glassTris.wind, ...glassTris.rear, ...glassTris.sideL, ...glassTris.sideR], root);
 
   /* ------------------------------ doors */
   const doors = [];
@@ -623,6 +620,8 @@ export function buildCarModel(typeName, color, opts = {}) {
   /* ------------------------------ lights, grille, plates, details */
   const details = new THREE.Group();
   root.add(details);
+  const lamps = new THREE.Group();
+  root.add(lamps);
   const surf = (x, y, dir) => P.surfaceZ(x, y, dir);
   const hlY = T.noseY - 0.12;
   const hlX = P.W * 0.64;
@@ -632,7 +631,7 @@ export function buildCarModel(typeName, color, opts = {}) {
     const hl = new THREE.Mesh(roundedBoxGeo(0.3, 0.1, 0.12), lights.head);
     hl.position.set(s * hlX, hlY, z - 0.04);
     hl.rotation.y = s * 0.28;
-    details.add(hl);
+    lamps.add(hl);
     const bezel = new THREE.Mesh(roundedBoxGeo(0.32, 0.12, 0.1), M.chrome);
     bezel.position.set(s * hlX, hlY, z - 0.055);
     bezel.rotation.y = s * 0.28;
@@ -642,7 +641,7 @@ export function buildCarModel(typeName, color, opts = {}) {
     const fz = surf(s * (P.W - 0.32), T.bottomY + 0.2, 1);
     const fl = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.03, 12).rotateX(Math.PI / 2), lights.head);
     fl.position.set(s * (P.W - 0.32), T.bottomY + 0.2, fz - 0.005);
-    details.add(fl);
+    lamps.add(fl);
   }
   // grille
   {
@@ -669,17 +668,17 @@ export function buildCarModel(typeName, color, opts = {}) {
     const tl = new THREE.Mesh(roundedBoxGeo(0.32, 0.1, 0.08), lights.tail);
     tl.position.set(s * x, tlY, z + 0.025);
     tl.rotation.y = -s * 0.25;
-    details.add(tl);
+    lamps.add(tl);
     tailLights.push(tl);
     const rv = new THREE.Mesh(roundedBoxGeo(0.1, 0.06, 0.06), lights.reverse);
     rv.position.set(s * (x - 0.26), tlY, surf(s * (x - 0.26), tlY, -1) + 0.018);
-    details.add(rv);
+    lamps.add(rv);
   }
   {
     const z = surf(0, tlY, -1);
     const strip = new THREE.Mesh(new THREE.BoxGeometry(P.W * 0.7, 0.025, 0.03), lights.tail);
     strip.position.set(0, tlY, z + 0.005);
-    details.add(strip);
+    lamps.add(strip);
   }
   // plates
   const plateText = `${String.fromCharCode(65 + rng.int(0, 25))}${String.fromCharCode(65 + rng.int(0, 25))}${rng.int(100, 999)}`;
@@ -768,7 +767,7 @@ export function buildCarModel(typeName, color, opts = {}) {
     b.position.set(-0.28, 0.07, 0);
     siren.add(r, b);
     siren.position.set(0, T.roofY + 0.06, (T.zRoofFront + T.zRoofRear) / 2);
-    details.add(siren);
+    lamps.add(siren);
   }
   // antenna
   if (!T.taxi && !T.police && T.zRoofRear > -1.5) {
@@ -777,7 +776,9 @@ export function buildCarModel(typeName, color, opts = {}) {
     ant.rotation.x = -0.35;
     details.add(ant);
   }
-  details.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
+  mergeByMaterial(details);
+  mergeByMaterial(interior, [steerFrame]);
+  for (const g of [details, interior, lamps]) g.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = true; } });
 
   /* ------------------------------ wheels */
   const wheels = [];
@@ -794,11 +795,10 @@ export function buildCarModel(typeName, color, opts = {}) {
     flip.add(spin);
     const tire = new THREE.Mesh(wheelGeo.tire, M.rubber);
     const rimM = new THREE.Mesh(wheelGeo.rim, T.label === 'Sport' || T.label === 'Muscle' ? M.rimDark : M.rim);
-    tire.castShadow = true; rimM.castShadow = true;
+    tire.castShadow = true; rimM.castShadow = false;
     spin.add(tire, rimM);
-    const disc = new THREE.Mesh(wheelGeo.disc, M.disc);
-    spin.add(disc);
     const caliper = new THREE.Mesh(wheelGeo.caliper, M.caliper);
+    caliper.castShadow = false;
     caliper.position.set(0, T.wheelR * 0.38, front ? -0.06 : 0.06);
     flip.add(caliper);
     wheels.push({ mount, spin, flip, x, z, front, side: x > 0 ? 1 : -1 });
@@ -810,9 +810,36 @@ export function buildCarModel(typeName, color, opts = {}) {
 
   return {
     T, root, profile: P, paint, lights, glassMeshes, doors, wheels, steeringWheel, steerFrame, wheelCenter, rimR, tilt,
-    pedals, seat: new THREE.Vector3(sx, sy, sz), headLights, tailLights, siren, deformables, interior, details,
+    pedals, seat: new THREE.Vector3(sx, sy, sz), headLights, tailLights, siren, deformables, interior, details, lamps,
     halfW: P.W, halfL: P.L, plate: plateText,
   };
+}
+
+/** Bakes all static meshes of a group into one mesh per material (fewer draw calls). */
+function mergeByMaterial(group, exclude = []) {
+  group.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map();
+  const remove = [];
+  group.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const ex of exclude) { let p = o; while (p) { if (p === ex) return; p = p.parent; } }
+    const m = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    let g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    g.applyMatrix4(m);
+    if (!buckets.has(o.material)) buckets.set(o.material, []);
+    buckets.get(o.material).push(g);
+    remove.push(o);
+  });
+  for (const o of remove) o.parent.remove(o);
+  for (const [mat, list] of buckets) {
+    const merged = mergeGeometries(list, false);
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, mat);
+    group.add(mesh);
+  }
 }
 
 function roundedBoxGeo(w, h, d) {

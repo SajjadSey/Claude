@@ -931,7 +931,7 @@ export class City {
         const t = k / 5;
         pts.push(new THREE.Vector3(Math.sin(t * 1.2) * lean * t, t * H, 0));
       }
-      const trunk = taperedTube(pts, 0.26, 0.16, 9);
+      const trunk = taperedTube(pts, 0.26, 0.16, 7);
       // TubeGeometry: uv.x runs along the length, uv.y around -> bark rings along the trunk
       const uv = trunk.attributes.uv;
       for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getY(k), uv.getX(k) * 8.0);
@@ -943,7 +943,7 @@ export class City {
         const a = f / nF * Math.PI * 2 + v;
         const len = 3.6 + (f % 3) * 0.4;
         const droop = 0.9 + (f % 2) * 0.4;
-        const g = new THREE.PlaneGeometry(1.0, len, 1, 8);
+        const g = new THREE.PlaneGeometry(1.0, len, 1, 6);
         const p = g.attributes.position;
         for (let k = 0; k < p.count; k++) {
           const yy = p.getY(k) + len / 2; // 0..len
@@ -963,7 +963,7 @@ export class City {
       const nuts = [];
       for (let k = 0; k < 4; k++) {
         const a = k * 1.7;
-        nuts.push(normalizeGeo(new THREE.SphereGeometry(0.16, 8, 6).translate(top.x + Math.cos(a) * 0.25, top.y - 0.3, top.z + Math.sin(a) * 0.25)));
+        nuts.push(normalizeGeo(new THREE.SphereGeometry(0.16, 6, 4).translate(top.x + Math.cos(a) * 0.25, top.y - 0.3, top.z + Math.sin(a) * 0.25)));
       }
       variants.push({ trunk, fronds: mergeGeos(frondParts), nuts: mergeGeos(nuts) });
     }

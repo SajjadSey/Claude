@@ -66,8 +66,8 @@ function capsuleProfile(r1, r2, len, capSeg = 5, midSeg = 6) {
 }
 
 /** Tapered capsule from y=0 (radius r1) down to y=-len (radius r2). */
-function limb(r1, r2, len, radial = 12, sx = 1, sz = 1) {
-  const g = new THREE.LatheGeometry(capsuleProfile(r1, r2, len), radial);
+function limb(r1, r2, len, radial = 10, sx = 1, sz = 1) {
+  const g = new THREE.LatheGeometry(capsuleProfile(r1, r2, len, 4, 5), radial);
   if (sx !== 1 || sz !== 1) g.scale(sx, 1, sz);
   return g;
 }
@@ -79,13 +79,13 @@ function latheProfile(prof, radial = 16, sx = 1, sz = 1) {
   return g;
 }
 
-function ellipsoid(rx, ry, rz, w = 16, h = 12) {
+function ellipsoid(rx, ry, rz, w = 12, h = 9) {
   return new THREE.SphereGeometry(1, w, h).scale(rx, ry, rz);
 }
 
 function roundedBox(sx, sy, sz, r = 0.4) {
   // squashed sphere-box hybrid
-  const g = new THREE.BoxGeometry(1, 1, 1, 4, 4, 4);
+  const g = new THREE.BoxGeometry(1, 1, 1, 3, 3, 3);
   const p = g.attributes.position;
   const v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
@@ -192,16 +192,23 @@ export class Rig {
       top: { bone: 'chest', y: 0.21, range: 0.08 },
     });
 
+    // shirt hem over the belt line
+    P(new THREE.TorusGeometry(0.142, 0.013, 6, 22).rotateX(Math.PI / 2).scale((fem ? 0.92 : 1.0) * bw, 1, 0.76).translate(0, -0.035, 0), 'spine', shirt, {
+      shirt: true, bot: { bone: 'hips', y: 0.0, range: 0.08, up: true },
+    });
+    // glutes
+    for (const sx of [-1, 1]) P(ellipsoid(0.078 * (fem ? 1.08 : 1), 0.08, 0.07).translate(sx * 0.062, -0.075, -0.055), 'hips', pants);
+
     // ---------- chest / ribcage + shoulders
     const chestProf = [[0, -0.05], [0.14, -0.04], [0.155, 0.04], [0.175, 0.12], [0.18, 0.17], [0.16, 0.215], [0.1, 0.25], [0.05, 0.27], [0, 0.275]];
     P(latheProfile(chestProf, 20, (fem ? 0.92 : 1.06) * bw, fem ? 0.7 : 0.68), 'chest', shirt, {
       shirt: true, bot: { bone: 'spine', y: 0.0, range: 0.1, up: true },
     });
     if (fem) {
-      for (const sx of [-1, 1]) P(ellipsoid(0.058, 0.055, 0.055, 12, 10).translate(sx * 0.06, 0.115, 0.082), 'chest', shirt, { shirt: true });
+      for (const sx of [-1, 1]) P(ellipsoid(0.058, 0.055, 0.055, 8, 6).translate(sx * 0.06, 0.115, 0.082), 'chest', shirt, { shirt: true });
     } else {
       // pectoral shape
-      for (const sx of [-1, 1]) P(ellipsoid(0.075, 0.05, 0.035, 12, 8).translate(sx * 0.065, 0.14, 0.09), 'chest', shirt, { shirt: true });
+      for (const sx of [-1, 1]) P(ellipsoid(0.068, 0.042, 0.02).translate(sx * 0.06, 0.145, 0.088), 'chest', shirt, { shirt: true });
     }
     // trapezius
     P(ellipsoid(0.15 * bw, 0.06, 0.07, 14, 8).translate(0, 0.22, -0.02), 'chest', shirt, { shirt: true });
@@ -220,7 +227,7 @@ export class Rig {
       const sx = side === 'L' ? 1 : -1;
       const armSkin = shirtSleeve === 'long' ? shirt : skin;
       // deltoid
-      P(ellipsoid(0.066, 0.07, 0.066, 12, 10).translate(-sx * 0.005, -0.02, 0), 'upperArm' + side, shirtSleeve === 'none' ? skin : shirt, {
+      P(ellipsoid(0.066, 0.07, 0.066, 8, 6).translate(-sx * 0.005, -0.02, 0), 'upperArm' + side, shirtSleeve === 'none' ? skin : shirt, {
         shirt: shirtSleeve !== 'none',
         top: { bone: 'chest', y: 0.03, range: 0.06 },
       });
@@ -371,24 +378,24 @@ export class Rig {
     const skin = app.skin, hair = app.hair;
     const fem = app.female;
     // cranium & face
-    P(ellipsoid(0.092, 0.108, 0.1, 22, 18).translate(0, 0.105, 0.008), 'head', skin, { bot: { bone: 'neck', y: 0.0, range: 0.04, up: true } });
+    P(ellipsoid(0.092, 0.108, 0.1, 18, 14).translate(0, 0.105, 0.008), 'head', skin, { bot: { bone: 'neck', y: 0.0, range: 0.04, up: true } });
     // jaw / chin
-    P(ellipsoid(fem ? 0.068 : 0.075, 0.062, 0.075, 16, 12).translate(0, 0.045, 0.03), 'head', skin);
-    P(ellipsoid(0.03, 0.022, 0.025, 10, 8).translate(0, 0.012, 0.075), 'head', skin);
-    // cheekbones
-    for (const sx of [-1, 1]) P(ellipsoid(0.03, 0.022, 0.025, 10, 8).translate(sx * 0.052, 0.085, 0.072), 'head', skin);
+    P(ellipsoid(fem ? 0.062 : 0.068, 0.052, 0.07, 14, 10).translate(0, 0.04, 0.032), 'head', skin);
+    P(ellipsoid(0.03, 0.022, 0.025, 8, 6).translate(0, 0.012, 0.075), 'head', skin);
+    // soft cheeks blending cranium and jaw
+    for (const sx of [-1, 1]) P(ellipsoid(0.03, 0.026, 0.022, 8, 6).translate(sx * 0.045, 0.074, 0.068), 'head', skin);
     // ears
     for (const sx of [-1, 1]) {
-      P(ellipsoid(0.012, 0.028, 0.02, 10, 8).translate(sx * 0.092, 0.095, 0.0), 'head', skin);
+      P(ellipsoid(0.009, 0.025, 0.016, 8, 6).rotateY(sx * 0.35).translate(sx * 0.089, 0.096, -0.018), 'head', shade(skin, 0.9));
     }
     // nose
     const nose = new THREE.ConeGeometry(0.016, 0.045, 10).rotateX(Math.PI * 0.6).translate(0, 0.088, 0.108);
     P(nose, 'head', skin);
-    P(ellipsoid(0.017, 0.012, 0.012, 10, 8).translate(0, 0.072, 0.112), 'head', skin);
+    P(ellipsoid(0.017, 0.012, 0.012, 8, 6).translate(0, 0.072, 0.112), 'head', skin);
     // eyes
     for (const sx of [-1, 1]) {
-      P(ellipsoid(0.015, 0.011, 0.01, 12, 8).translate(sx * 0.034, 0.105, 0.093), 'head', '#f4f1ea');
-      P(ellipsoid(0.0075, 0.0075, 0.004, 10, 8).translate(sx * 0.034, 0.105, 0.1025), 'head', app.eyes || '#3b2a1a');
+      P(ellipsoid(0.015, 0.011, 0.01, 10, 6).translate(sx * 0.034, 0.105, 0.093), 'head', '#f4f1ea');
+      P(ellipsoid(0.0075, 0.0075, 0.004, 8, 6).translate(sx * 0.034, 0.105, 0.1025), 'head', app.eyes || '#3b2a1a');
       P(ellipsoid(0.0035, 0.0035, 0.002, 8, 6).translate(sx * 0.034, 0.105, 0.1062), 'head', '#050505');
       // eyelid
       P(ellipsoid(0.017, 0.006, 0.011, 12, 6).translate(sx * 0.034, 0.113, 0.093), 'head', skin);
@@ -396,28 +403,35 @@ export class Rig {
       P(new THREE.BoxGeometry(0.036, 0.007, 0.01).rotateZ(sx * (fem ? -0.1 : -0.05)).translate(sx * 0.036, 0.128, 0.098), 'head', hair);
     }
     // mouth
-    P(ellipsoid(0.022, 0.0055, 0.008, 12, 6).translate(0, 0.048, 0.1), 'head', fem ? '#b04a52' : '#8a4a40');
-    P(ellipsoid(0.02, 0.004, 0.007, 12, 6).translate(0, 0.041, 0.098), 'head', fem ? '#c25a62' : '#9a5a50');
+    const lipZ = app.beard ? 0.114 : 0.1;
+    P(ellipsoid(0.022, 0.0055, 0.008, 12, 6).translate(0, 0.048, lipZ), 'head', fem ? '#b04a52' : '#8a4a40');
+    P(ellipsoid(0.02, 0.004, 0.007, 12, 6).translate(0, 0.041, lipZ - 0.002), 'head', fem ? '#c25a62' : '#9a5a50');
     // beard / stubble
     if (app.beard) {
-      P(ellipsoid(0.079, 0.06, 0.077, 16, 10).translate(0, 0.043, 0.031), 'head', shade(hair, 0.9), { stubble: true });
+      // beard: lower shell of an ellipsoid wrapping the jaw and chin
+      P(new THREE.SphereGeometry(1, 16, 10, 0, Math.PI * 2, Math.PI * 0.36, Math.PI * 0.64).scale(0.073, 0.057, 0.076).translate(0, 0.04, 0.032), 'head', shade(hair, 0.95));
+      P(ellipsoid(0.03, 0.007, 0.012).translate(0, 0.061, 0.108), 'head', shade(hair, 0.95)); // moustache
     }
     // hair
     const hs = app.hairStyle;
     if (hs !== 'bald') {
-      const cap = (r, thetaLen = Math.PI * 0.55) => new THREE.SphereGeometry(r, 22, 14, 0, Math.PI * 2, 0, thetaLen);
+      const cap = (r, thetaLen = Math.PI * 0.55) => new THREE.SphereGeometry(r, 18, 10, 0, Math.PI * 2, 0, thetaLen);
       if (hs === 'buzz') {
-        P(cap(0.098, Math.PI * 0.52).scale(0.97, 1.05, 1.04).rotateX(-0.35).translate(0, 0.112, 0.0), 'head', hair);
+        P(cap(0.1, Math.PI * 0.52).scale(0.95, 1.02, 0.99).rotateX(-0.68).translate(0, 0.106, 0.004), 'head', hair);
       } else if (hs === 'curly') {
-        P(cap(0.115, Math.PI * 0.58).scale(1.0, 1.0, 1.05).rotateX(-0.3).translate(0, 0.11, -0.004), 'head', hair);
+        P(cap(0.112, Math.PI * 0.55).scale(1.0, 1.0, 1.03).rotateX(-0.62).translate(0, 0.108, -0.004), 'head', hair);
         for (let k = 0; k < 10; k++) {
           const a = k / 10 * Math.PI * 2;
           P(ellipsoid(0.03, 0.03, 0.03, 8, 6).translate(Math.cos(a) * 0.08, 0.17 + Math.sin(k) * 0.01, Math.sin(a) * 0.08 - 0.01), 'head', hair);
         }
       } else {
-        P(cap(0.104, Math.PI * 0.56).scale(0.98, 1.06, 1.06).rotateX(-0.38).translate(0, 0.113, -0.002), 'head', hair);
-        // fringe / top volume
-        P(ellipsoid(0.085, 0.035, 0.07, 14, 8).rotateX(-0.2).translate(0, 0.19, 0.02), 'head', hair);
+        // scalp hair: a cap that hugs the cranium, lower at the back than at the front
+        // front edge ~55deg from the top (hairline), back edge ~136deg (nape): half-angle 0.53pi tilted back 0.71 rad
+        P(cap(0.104, Math.PI * 0.53).scale(0.95, 1.03, 1.0).rotateX(-0.6).translate(0, 0.106, 0.004), 'head', hair);
+        // a little volume on top
+        P(ellipsoid(0.07, 0.025, 0.065).rotateX(-0.1).translate(0, 0.19, 0.0), 'head', hair);
+        // sideburns
+        for (const sx of [-1, 1]) P(ellipsoid(0.006, 0.024, 0.012).translate(sx * 0.091, 0.098, 0.03), 'head', hair);
         if (hs === 'long' || hs === 'bob') {
           const len = hs === 'long' ? 0.24 : 0.12;
           P(latheProfile([[0, -len], [0.06, -len + 0.01], [0.095, -len + 0.06], [0.105, 0.0], [0.1, 0.06], [0, 0.065]], 18, 1.02, 0.95)

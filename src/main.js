@@ -118,7 +118,7 @@ class Game {
     this.camRig.yaw = -0.7;
     this.hud = new HUD(this);
     // warm-up: prefill traffic & peds around the player
-    for (let i = 0; i < 10; i++) this.traffic.trySpawn(25, 150);
+    for (let i = 0; i < 7; i++) this.traffic.trySpawn(25, 150);
     for (let i = 0; i < 18; i++) this.peds.spawn(6, 80);
     this.setLoading(0.9, 'Compiling shaders…');
     await nextFrame();
@@ -342,7 +342,19 @@ class Game {
     if (steps >= 5) this.acc = 0;
 
     for (const v of this.vehicles) { v.update(dt); v.syncVisual(); }
-    for (const c of this.characters) c.update(dt);
+    // characters far from the camera are animated at half rate
+    this.frameNo = (this.frameNo || 0) + 1;
+    const camP = this.camera.position;
+    for (const c of this.characters) {
+      c.lodAcc = (c.lodAcc || 0) + dt;
+      const cd2 = camP.distanceToSquared(c.pos);
+      const shadowOn = c.isPlayer || cd2 < 40 * 40;
+      if (c.rig.mesh.castShadow !== shadowOn) c.rig.mesh.castShadow = shadowOn;
+      const far = !c.isPlayer && c.state !== 'ragdoll' && c.state !== 'seq' && cd2 > 45 * 45;
+      if (far && ((this.frameNo + c.id) & 1)) continue;
+      c.update(Math.min(c.lodAcc, 0.1));
+      c.lodAcc = 0;
+    }
     this.vehicleFX(dt);
     this.props.update();
     this.city.update(this.time, dt);
@@ -540,21 +552,24 @@ class ParkedCars {
     this.t = 0.5;
     const g = this.game;
     const p = g.player.character.pos;
+    let active = this.spots.filter((s) => s.veh && !s.veh.removed).length;
     for (const s of this.spots) {
       const d = Math.hypot(s.x - p.x, s.z - p.z);
-      if (!s.veh && d < 120) {
+      if (!s.veh && d < 85 && active < 16) {
         // avoid spawning into something
         let clear = true;
         for (const v of g.vehicles) if ((v.curPos.x - s.x) ** 2 + (v.curPos.z - s.z) ** 2 < 9) { clear = false; break; }
         if (!clear) continue;
         s.veh = g.addVehicle(s.type, null, _v.set(s.x, s.y + 0.06, s.z), s.yaw);
         s.veh.parkedSpot = s;
-      } else if (s.veh && d > 180) {
+        active++;
+      } else if (s.veh && d > 130) {
         const v = s.veh;
         if (v.removed) { s.veh = null; continue; }
         if (v === g.player.lastVehicle || v.driver) { s.veh = null; continue; }
         g.removeVehicle(v);
         s.veh = null;
+        active--;
       } else if (s.veh && s.veh.removed) s.veh = null;
     }
   }

@@ -147,7 +147,7 @@ export class Locomotion {
       for (const f of this.feet) {
         const fp = (this.phase + (f.side > 0 ? 0 : 0.5)) % 1;
         if (fp < f.lastFp && !f.swing) {
-          this.startSwing(f, swingDur, false, lerp(0.11, 0.26, runT));
+          this.startSwing(f, swingDur, false, lerp(0.11, 0.3, runT) + clamp((sp - 5) * 0.04, 0, 0.1));
         }
         f.lastFp = fp;
       }
@@ -193,7 +193,8 @@ export class Locomotion {
         f.pos.x = lerp(f.from.x, f.target.x, e);
         f.pos.z = lerp(f.from.z, f.target.z, e);
         f.pos.y = lerp(f.from.y, f.target.y, e);
-        const liftShape = Math.sin(Math.PI * Math.min(1, u * 1.08));
+        const uk = Math.pow(Math.min(1, u * 1.05), f.idleStep ? 1 : lerp(1, 0.7, runT));
+        const liftShape = Math.sin(Math.PI * uk);
         f.liftAmt = f.lift * Math.pow(Math.max(0, liftShape), 0.8) + Math.max(0, (f.target.y - f.from.y)) * 0.0;
         f.yaw = f.yawFrom + wrapAngle(c.yaw - f.yawFrom) * smooth01(Math.min(1, u * 1.3));
         const mw = Math.min(1, sp / 1.5);
@@ -256,8 +257,9 @@ export class Locomotion {
     const bob = bobA * Math.cos(4 * Math.PI * (this.phase - sw / 2));
     const sway = -lerp(0.022, 0.008, runT) * moveW * s * Math.cos(2 * Math.PI * (this.phase - sw / 2));
     // forward offsets of the feet relative to the hips (normalized)
-    const fl = ((this.feet[0].pos.x - c.pos.x) * fwdX + (this.feet[0].pos.z - c.pos.z) * fwdZ) / (this.stepLen + 0.05);
-    const fr = ((this.feet[1].pos.x - c.pos.x) * fwdX + (this.feet[1].pos.z - c.pos.z) * fwdZ) / (this.stepLen + 0.05);
+    const norm = Math.max(0.3, this.stepLen * 0.42);
+    const fl = clamp(((this.feet[0].pos.x - c.pos.x) * fwdX + (this.feet[0].pos.z - c.pos.z) * fwdZ) / norm, -1.3, 1.3);
+    const fr = clamp(((this.feet[1].pos.x - c.pos.x) * fwdX + (this.feet[1].pos.z - c.pos.z) * fwdZ) / norm, -1.3, 1.3);
     const pelvisYaw = clamp(-(fl - fr) * lerp(0.09, 0.14, runT) * moveW, -0.25, 0.25);
     const swL = this.feet[0].swing ? Math.sin(Math.PI * Math.min(1, this.feet[0].u)) : 0;
     const swR = this.feet[1].swing ? Math.sin(Math.PI * Math.min(1, this.feet[1].u)) : 0;
@@ -337,7 +339,7 @@ export class Locomotion {
 
     // ---------------------------------------------------- arms (FK)
     const runArm = runT;
-    const amp = lerp(0.3, 0.95, runArm) * moveW;
+    const amp = lerp(0.36, 0.85, runArm) * moveW;
     const swingL = clamp(-amp * fr, -1.2, 1.0);
     const swingR = clamp(-amp * fl, -1.2, 1.0);
     const elbowBase = lerp(0.22, 1.45, runArm);
